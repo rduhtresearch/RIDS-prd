@@ -1,0 +1,106 @@
+# ==============================================================================
+# LIBRARIES
+# ==============================================================================
+library(DBI)
+library(duckdb)
+library(sodium)
+library(shiny)
+library(bs4Dash)
+library(waiter)
+library(shinyFeedback)
+library(shinyjs)
+library(reactable)
+library(DT)
+library(jsonlite)
+library(zip)
+
+# ==============================================================================
+# SOURCE UTILS
+# ==============================================================================
+source("R/utils/deployment_config.R")
+source("R/utils/auth.r")
+source("R/utils/logging.R")
+source("R/utils/user_credentials.R")
+source("R/utils/db_error_handling.R")
+source("R/utils/add_study_arm.r")
+source("R/utils/pipeline_fixed.r")
+source("R/utils/posting_test.r")
+source("R/utils/extract_cpms_id.r")
+source("R/utils/template_build_main.r")
+source("R/utils/posting_lines.r")
+source("R/utils/dev_banner.r")
+source("R/utils/loading_state_ui.R")
+source("R/utils/add_cost_centres.r")
+source("R/utils/screening_failure_transform.R")
+source("R/utils/assign_edge_keys.R")
+source("R/utils/adjust.r")
+source("R/utils/build_template.r")
+source("R/utils/validate_ict_workbook.r")
+source("R/utils/study_deletion.R")
+
+# Custom activity source files
+source("R/addons/custom_activities/ca_build_custom_rows.R",    local = FALSE)
+source("R/addons/custom_activities/ca_schema.R",               local = FALSE)
+source("R/addons/custom_activities/ca_ref_activities.R",       local = FALSE)
+source("R/addons/custom_activities/ca_queries.R",              local = FALSE)
+source("R/addons/custom_activities/ca_assign_edge_keys.R",     local = FALSE)
+source("R/addons/custom_activities/apply_custom_activities.R", local = FALSE)
+
+# ==============================================================================
+# GLOBAL CONFIGURATION & INITIALIZATION
+# ==============================================================================
+# Load deployment config written by SETUP/new_setup.R
+APP_CONFIG <- load_runtime_config(getwd())
+CONFIG_SOURCE_PATH <- APP_CONFIG$source_path
+STORAGE_MODE <- APP_CONFIG$storage_mode
+DB_DIR <- APP_CONFIG$db_dir
+ICT_UPLOAD_DIR <- APP_CONFIG$ict_upload_dir
+EDGE_OUTPUT_DIR <- APP_CONFIG$edge_output_dir
+APP_HOST <- APP_CONFIG$app_host
+APP_PORT <- APP_CONFIG$app_port
+APP_RUN_LOG_DIR <- APP_CONFIG$app_log_dir
+CREDENTIAL_SECRET <- APP_CONFIG$credential_secret
+APP_STATUS <- APP_CONFIG$app_status
+APP_RUN_LOG_FILE <- initialize_app_run_logging(APP_RUN_LOG_DIR)
+
+app_log_info("startup", "Global initialization started")
+
+# Connect to database
+CON <- connect_primary_database(APP_CONFIG)
+app_log_info("startup", "Primary database connected")
+
+# Load paths from DB settings (admin may have updated them); fall back to config values
+ICT_UPLOAD_DIR_DEFAULT <- ICT_UPLOAD_DIR
+
+ICT_UPLOAD_DIR <- tryCatch({
+  val <- dbGetQuery(CON, "SELECT value FROM app_settings WHERE key = 'ict_upload_dir'")
+  if (nrow(val) > 0) val$value else ICT_UPLOAD_DIR_DEFAULT
+}, error = function(e) ICT_UPLOAD_DIR_DEFAULT)
+
+EDGE_OUTPUT_DIR_DEFAULT <- EDGE_OUTPUT_DIR
+
+EDGE_OUTPUT_DIR <- tryCatch({
+  val <- dbGetQuery(CON, "SELECT value FROM app_settings WHERE key = 'edge_output_dir'")
+  if (nrow(val) > 0) val$value else EDGE_OUTPUT_DIR_DEFAULT
+}, error = function(e) EDGE_OUTPUT_DIR_DEFAULT)
+db_main()
+# ==============================================================================
+# SHINY SESSION CLEANUP
+# ==============================================================================
+onStop(function() {
+  app_log_info("shutdown", "Closing primary database")
+  close_duckdb_connection(CON)
+  close_app_run_logging()
+})
+
+# ==============================================================================
+# Version consts
+# ==============================================================================
+APP_VERSION <- trimws(Sys.getenv("RIDS_APP_VERSION", "v1.0.0"))
+APP_VERSION_LABEL <- if (grepl("^[vV]", APP_VERSION)) APP_VERSION else paste0("v", APP_VERSION)
+APP_TITLE <- paste("RIDS", APP_VERSION_LABEL)
+APP_LAST_UPDATED <- trimws(Sys.getenv("RIDS_APP_LAST_UPDATED", "2026-05-06"))
+AUTH_SESSION_HOURS <- suppressWarnings(as.numeric(Sys.getenv("RIDS_AUTH_SESSION_HOURS", "10")))
+if (is.na(AUTH_SESSION_HOURS) || AUTH_SESSION_HOURS <= 0) {
+  AUTH_SESSION_HOURS <- 10
+}

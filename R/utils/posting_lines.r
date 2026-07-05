@@ -1,0 +1,667 @@
+#!/usr/bin/env Rscript
+# generate_posting_plan.R
+#
+# Refactored from posting_test.r (02_generate_posting_plan_AH.R).
+#
+# Context — the "join issue" in the old system:
+#   join_testv10.R built an ict_cost_table with an overloaded `Visit_Name` column:
+#     - For MFF/scheduled rows: Visit_Name = the visit column header ("Screening", "Day 30")
+#     - For UA/SC/SSP rows:     Visit_Name = the Activity name ("Blood Test", "CT Scan")
+#   import_refactor_v22.R then merged against this table using different keys depending
+#   on context (Visit_Type vs Activity), causing silent misjoins and NAs.
+#
+#   pipeline_fixed.r resolved this by splitting into two unambiguous columns:
+#     Visit_Label   — the visit dimension (human-readable visit name)
+#     Activity_Name — the activity dimension (always the activity)
+#   and writing them into DuckDB's ict_costing_tbl with the schema:
+#     (CPMS_ID, study_site, scenario_id, Study, Visit_Number, Study_Arm, Visit_Label, Activity_Name, ICT_Cost)
+#
+# This script consumes Stage B output from pipeline_fixed.r (long format, one row per
+# activity-visit-occurrence) and generates a posting plan using DuckDB finance rules.
+# It carries the corrected columns (Study_Arm, Visit_Label, activity_occurrence_id)
+# through the entire pipeline so downstream joins are always unambiguous.
+#
+# Optionally, it can join back to ict_costing_tbl to attach Contract_Cost using the
+# corrected composite key (CPMS_ID + study_site + scenario_id + Visit_Number + Study_Arm + Activity_Name) —
+# the key that the old system could never get right with the overloaded Visit_Name.
+#
+# What changed vs the linear posting_test.r:
+#   - All hardcoded paths removed; everything parameterised.
+#   - Linear body -> composable functions with a single entry point.
+#   - Debug artefacts removed (View(), test_id TRAINING_FEE hack).
+#   - Multi-sheet reading extracted into read_ict_workbook().
+#   - DB connection scoped inside load_rules() / join_ict_costs(); no leaked globals.
+#   - Optional contract-cost join via ict_costing_tbl with corrected keys.
+#   - All posting logic (normalisation, rule eval, amount calc, routing) preserved.
+
+suppressPackageStartupMessages({
+  library(DBI)
+  library(duckdb)
+  library(dplyr)
+  library(tidyr)
+  library(stringr)
+  library(purrr)
+  library(readr)
+  library(openxlsx)
+})
+
+# ======================================================================
+# Helpers
+# ======================================================================
+
+#' Evaluate a single rule condition against the current row context.
+#'
+#' Supports: is_medic = TRUE / FALSE (MVP).
+#' Returns TRUE when no condition is specified (unconditional rule).
+#' Returns FALSE for unknown conditions (fail-safe).
+condition_passes <- function(condition_field, condition_op, condition_value, is_medic) {
+  if (is.na(condition_field) || condition_field == "") return(TRUE)
+  
+  if (condition_field == "is_medic" && condition_op == "=" &&
+      condition_value %in% c("TRUE", "FALSE")) {
+    return(is_medic == (condition_value == "TRUE"))
+  }
+  
+  FALSE
+}
+
+normalize_mff_split_config <- function(mff_split_enabled = FALSE, mff_split_pct = 0) {
+  split_enabled <- isTRUE(mff_split_enabled)
+  split_pct <- suppressWarnings(as.numeric(mff_split_pct))
+
+  if (!is.finite(split_pct)) {
+    split_pct <- 0
+  }
+  if (split_pct < 0 || split_pct > 1) {
+    stop("mff_split_pct must be between 0 and 1 inclusive.")
+  }
+
+  list(
+    mff_split_enabled = split_enabled,
+    mff_split_pct = split_pct,
+    split_active = split_enabled && split_pct > 0
+  )
+}
+
+# ======================================================================
+# 1. ICT Input
+# ======================================================================
+
+#' Read the Stage B output workbook (all sheets) into a single long dataframe.
+#'
+#' This is the output of pipeline_fixed.r's process_workbook(), which has already:
+#'   - Resolved the old Visit_Name ambiguity into Visit_Label + Activity columns
+#'   - Added Study_Arm per row (via add_study_arm.r)
+#'   - Pivoted to long format (one row per activity-visit occurrence)
+#'
+#' @param ict  Path to the .xlsx workbook, OR a pre-loaded named list of dataframes
+#'             (as returned by process_workbook()), OR a single pre-stacked dataframe.
+#' @return     Single dataframe with a `sheet_name` column identifying the source sheet.
+read_ict_workbook <- function(ict) {
+  
+  # Already a single stacked dataframe (e.g. passed from memory)
+  if (is.data.frame(ict)) {
+    df <- ict
+    
+    # Named list of dataframes (direct output from process_workbook / run_stage_b)
+  } else if (is.list(ict) && !is.data.frame(ict)) {
+    df <- imap_dfr(ict, function(d, nm) {
+      if (is.null(d) || nrow(d) == 0) return(NULL)
+      d$sheet_name <- nm
+      d
+    })
+    
+    # File path
+  } else if (is.character(ict) && length(ict) == 1) {
+    if (!file.exists(ict)) stop("read_ict_workbook(): file not found: ", ict)
+    sheet_names <- getSheetNames(ict)
+    df <- map_dfr(sheet_names, function(sheet) {
+      d <- read.xlsx(ict, sheet = sheet)
+      d$sheet_name <- sheet
+      d
+    })
+  } else {
+    stop("read_ict_workbook(): `ict` must be a filepath, dataframe, or named list of dataframes.")
+  }
+  
+  # Stable row_id (unique across all sheets)
+  if (!"row_id" %in% names(df)) df$row_id <- seq_len(nrow(df))
+  
+  # Required columns
+  required <- c("Activity.Type", "Staff.Role", "Activity.Cost")
+  missing  <- setdiff(required, names(df))
+  if (length(missing) > 0) {
+    stop("read_ict_workbook(): missing required columns: ", paste(missing, collapse = ", "))
+  }
+  
+  # MVP placeholders for routing context
+  if (!"provider_org" %in% names(df)) df$provider_org <- NA_character_
+  if (!"pi_org"       %in% names(df)) df$pi_org       <- NA_character_
+  if (!"calc_tag"     %in% names(df)) df$calc_tag      <- NA_character_
+  
+  # Ensure corrected-schema columns exist (from pipeline_fixed.r).
+  # These should already be present; warn if missing so it's obvious.
+  if (!"Study_Arm" %in% names(df)) {
+    warning("read_ict_workbook(): 'Study_Arm' column missing -- defaulting to sheet_name. ",
+            "This means the input may not have come from the corrected pipeline.")
+    df$Study_Arm <- df$sheet_name
+  }
+  if (!"Visit_Label" %in% names(df)) {
+    warning("read_ict_workbook(): 'Visit_Label' column missing -- defaulting to Visit. ",
+            "The old overloaded Visit_Name may cause incorrect joins downstream.")
+    df$Visit_Label <- if ("Visit" %in% names(df)) df$Visit else NA_character_
+  }
+  if (!"staff_group" %in% names(df)) {
+    warning("read_ict_workbook(): 'staff_group' column missing -- defaulting to 1. ",
+            "Duplicate activities with different staff may not join correctly.")
+    df$staff_group <- 1L
+  }
+  
+  df
+}
+
+# ======================================================================
+# 2. Row Normalisation
+# ======================================================================
+
+#' Normalise and derive row-level context columns.
+#'
+#' Adds: activity_type_norm, staff_role_norm, row_category_auto, row_category,
+#'       is_medic, scenario_id, ruleset_id.
+normalise_rows <- function(df, scenario_id, ruleset_id) {
+  df %>%
+    mutate(
+      activity_type_norm = str_to_lower(str_trim(.data$Activity.Type)),
+      staff_role_norm    = str_to_lower(str_trim(.data$Staff.Role)),
+      sheet_name_norm    = str_to_lower(str_trim(.data$sheet_name)),
+      
+      row_category_auto = case_when(
+        str_detect(sheet_name_norm, "setup") &
+          str_detect(sheet_name_norm, "closedown") &
+          str_detect(activity_type_norm, "departmental") ~ "SETUP_CLOSE_DEPARTMENTAL",
+        
+        str_detect(activity_type_norm, "investigation") ~ "INVESTIGATION",
+        
+        TRUE ~ "BASELINE"
+      ),
+      
+      calc_tag = if_else(is.na(calc_tag), NA_character_, str_trim(as.character(calc_tag))),
+      calc_tag = if_else(calc_tag == "", NA_character_, calc_tag),
+      
+      row_category = if_else(!is.na(calc_tag), calc_tag, row_category_auto),
+      
+      is_medic    = (str_trim(.data$Staff.Role) == "Medical Staff"),
+      scenario_id = .env$scenario_id,
+      ruleset_id  = .env$ruleset_id
+    )
+}
+
+# ======================================================================
+# 3. DB Layer
+# ======================================================================
+
+#' Load dist_rules, amount_map, and routing_rules from the finance rules DB.
+load_rules <- function(db_path, ruleset_id) {
+  if (!file.exists(db_path)) stop("load_rules(): DB not found: ", db_path)
+  
+  con <- dbConnect(duckdb::duckdb(), dbdir = db_path, read_only = TRUE)
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  
+  dist_rules <- dbGetQuery(con, "
+    SELECT scenario_id, row_category, condition_field, condition_op, condition_value,
+           posting_line_type_id, priority
+    FROM dist_rules
+    WHERE ruleset_id = ?
+  ", params = list(ruleset_id))
+  
+  amount_map <- dbGetQuery(con, "
+    SELECT posting_line_type_id, base_mult, split_mult, applies_to_row_category, calc_method
+    FROM amount_map
+  ")
+  
+  routing_rules <- dbGetQuery(con, "
+    SELECT scenario_id, condition_field, condition_op, condition_value,
+           posting_line_type_id, destination_bucket, priority
+    FROM routing_rules
+    WHERE ruleset_id = ?
+  ", params = list(ruleset_id))
+  
+  list(
+    dist_rules    = dist_rules,
+    amount_map    = amount_map,
+    routing_rules = routing_rules
+  )
+}
+
+#' Join saved contract costs from ict_costing_tbl using the CORRECTED composite key.
+#'
+#' ── Why this exists ──
+#' The old system (join_testv10 -> import_refactor_v22) joined on `Visit_Name`
+#' which was overloaded:
+#'   Scheduled rows:  merge(... by.y = c("Visit_Number", "Visit_Name", ...))
+#'                    where Visit_Name = column header like "Screening"
+#'   UA/SSP/SC rows:  merge(... by.y = c("Visit_Number", "Visit_Name", ...))
+#'                    where Visit_Name = activity name like "Blood Test"
+#' Same column, different semantics -> silent misjoins and NAs.
+#'
+#' pipeline_fixed.r split this into:
+#'   Visit_Label   = visit dimension  (e.g. "Screening", "Day 30")
+#'   Activity_Name = activity dimension (e.g. "Blood Test", "CT Scan")
+#'
+#' This function joins on the UNAMBIGUOUS key:
+#'   (cpms_id, study_site, scenario_id, Visit, Study_Arm, Activity)
+#'   -> (CPMS_ID, study_site, scenario_id, Visit_Number, Study_Arm, Activity_Name)
+#'
+#' For MFF summary rows (Activity_Name IS NULL in the lookup), we fall back to
+#' visit-level: (CPMS_ID, study_site, scenario_id, Visit_Number, Study_Arm).
+#'
+#' @param df       Normalised posting dataframe.
+#' @param db_path  Path to the DuckDB containing ict_costing_tbl.
+#' @return df with `contract_cost` column attached from saved Step 2 values.
+join_ict_costs <- function(df, db_path) {
+  if (!file.exists(db_path)) {
+    warning("join_ict_costs(): DB not found: ", db_path, " -- skipping contract cost join.")
+    df$contract_cost <- NA_real_
+    return(df)
+  }
+  
+  con <- dbConnect(duckdb::duckdb(), dbdir = db_path, read_only = TRUE)
+  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
+  
+  if (!dbExistsTable(con, "ict_costing_tbl")) {
+    warning("join_ict_costs(): ict_costing_tbl not found in DB -- skipping.")
+    df$contract_cost <- NA_real_
+    return(df)
+  }
+  
+  ict <- dbGetQuery(con, "
+    SELECT CPMS_ID, study_site, scenario_id, Visit_Number, Study_Arm, Activity_Name, Contract_Cost,
+           activity_occurrence_id, staff_group
+    FROM ict_costing_tbl
+  ")
+  
+  # ── Row-level join: activity rows (Activity_Name NOT NULL) ─────────────────
+  # staff_group is the disambiguator: same activity at the same visit with
+  # different staff/costs gets a unique staff_group in pipeline_fixed.r.
+  # Including it in the join key gives a clean 1:1 match.
+  ict_activity <- ict %>% filter(!is.na(Activity_Name))
+  
+  df <- df %>%
+    left_join(
+      ict_activity %>% rename(contract_cost_activity = Contract_Cost),
+      by = c("cpms_id"     = "CPMS_ID",
+             "study_site"  = "study_site",
+             "scenario_id" = "scenario_id",
+             "Visit"       = "Visit_Number",
+             "Study_Arm"   = "Study_Arm",
+             "Activity"    = "Activity_Name",
+             "staff_group" = "staff_group")
+    )
+  
+  # ── Visit-level join: MFF summary rows (Activity_Name IS NULL) ─────────────
+  # MFF rows don't have activity_occurrence_id, so join on visit-level key only.
+  ict_visit <- ict %>%
+    filter(is.na(Activity_Name)) %>%
+    select(CPMS_ID, study_site, scenario_id, Visit_Number, Study_Arm, Contract_Cost) %>%
+    rename(contract_cost_visit = Contract_Cost)
+  
+  df <- df %>%
+    left_join(
+      ict_visit,
+      by = c("cpms_id"   = "CPMS_ID",
+             "study_site" = "study_site",
+             "scenario_id" = "scenario_id",
+             "Visit"     = "Visit_Number",
+             "Study_Arm" = "Study_Arm")
+    )
+  
+  # ── Coalesce: prefer activity-level, fall back to visit-level ──────────────
+  df <- df %>%
+    mutate(contract_cost = coalesce(contract_cost_activity, contract_cost_visit)) %>%
+    select(-contract_cost_activity, -contract_cost_visit)
+  
+  df
+}
+
+# ======================================================================
+# 4. Distribution Rules -> Posting Lines
+# ======================================================================
+
+#' Match distribution rules to each ICT row and explode into posting lines.
+#'
+#' Carries the corrected-schema columns (Study_Arm, Visit_Label,
+#' activity_occurrence_id) through so they appear in the final output.
+apply_dist_rules <- function(df, dist_rules, scenario_id,
+                             mff_split_enabled = FALSE, mff_split_pct = 0) {
+  split_cfg <- normalize_mff_split_config(mff_split_enabled, mff_split_pct)
+  
+  # Columns to carry through — intersect so missing optional cols don't error
+  carry_cols <- intersect(
+    names(df),
+    c("sheet_name", "Study_Arm", "Visit", "Activity", "cpms_id", "study_name",
+      "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
+      "is_medic", "Visit_Label", "activity_occurrence_id", "staff_group",
+      "provider_org", "pi_org", "Activity.Cost", "contract_cost", "Department",
+      "Cost_Type", "Staff.Role", "Activity.Type", "Time.Required")
+  )
+  
+  df %>%
+    select(all_of(carry_cols)) %>%
+    mutate(
+      activity_cost_num = as.numeric(gsub("[^0-9.]", "", .data$Activity.Cost))
+    ) %>%
+    rowwise() %>%
+    mutate(
+      posting_lines = list({
+        cand <- dist_rules %>%
+          filter(.data$scenario_id == .env$scenario_id,
+                 .data$row_category == .env$row_category) %>%
+          mutate(
+            ok = pmap_lgl(
+              list(condition_field, condition_op, condition_value),
+              ~ condition_passes(..1, ..2, ..3, is_medic)
+            )
+          ) %>%
+          filter(ok) %>%
+          arrange(priority)
+        
+        if (!split_cfg$split_active) {
+          cand <- cand %>%
+            filter(.data$posting_line_type_id != "MFF_SPLIT_NEW_CC")
+        }
+        
+        unique(cand$posting_line_type_id)
+      })
+    ) %>%
+    ungroup() %>%
+    select(-Activity.Cost) %>%
+    unnest(posting_lines) %>%
+    rename(posting_line_type_id = posting_lines)
+}
+
+# ======================================================================
+# 5. Amount Calculation
+# ======================================================================
+
+#' Join amount_map and compute posting_amount = AC * mff_rate * base_mult * split_mult.
+apply_amount_map <- function(posting_plan, amount_map, mff_rate,
+                             mff_split_enabled = FALSE, mff_split_pct = 0) {
+  split_cfg <- normalize_mff_split_config(mff_split_enabled, mff_split_pct)
+  mff_uplift <- mff_rate - 1
+  existing_mff_rate <- if (split_cfg$split_active) {
+    1 + (mff_uplift * (1 - split_cfg$mff_split_pct))
+  } else {
+    mff_rate
+  }
+
+  posting_plan <- posting_plan %>%
+    left_join(amount_map, by = "posting_line_type_id") %>%
+    mutate(
+      calc_method = coalesce(calc_method, "STANDARD")
+    ) %>%
+    group_by(row_id) %>%
+    mutate(
+      total_before_mff_factor = sum(
+        if_else(
+          calc_method == "MFF_SPLIT_ONLY",
+          0,
+          base_mult * split_mult
+        ),
+        na.rm = TRUE
+      )
+    ) %>%
+    ungroup() %>%
+    mutate(
+      missing_amount_map = is.na(base_mult) | is.na(split_mult) | is.na(calc_method),
+      posting_amount = case_when(
+        calc_method == "STANDARD" ~ activity_cost_num * existing_mff_rate * base_mult * split_mult,
+        calc_method == "MFF_SPLIT_ONLY" ~ activity_cost_num * total_before_mff_factor * mff_uplift * split_cfg$mff_split_pct,
+        TRUE ~ NA_real_
+      )
+    )
+  
+  if (any(posting_plan$missing_amount_map)) {
+    bad <- posting_plan %>%
+      filter(missing_amount_map) %>%
+      distinct(posting_line_type_id)
+    stop("Missing amount_map for posting_line_type_id(s): ",
+         paste(bad$posting_line_type_id, collapse = ", "))
+  }
+  
+  posting_plan
+}
+
+# ======================================================================
+# 6. Routing
+# ======================================================================
+
+#' Resolve the destination bucket for a single posting line.
+resolve_destination <- function(scenario_id, posting_line_type_id, is_medic,
+                                routing_rules) {
+  cand <- routing_rules %>%
+    filter(.data$scenario_id          == .env$scenario_id,
+           .data$posting_line_type_id == .env$posting_line_type_id) %>%
+    mutate(
+      ok = pmap_lgl(
+        list(condition_field, condition_op, condition_value),
+        ~ condition_passes(..1, ..2, ..3, is_medic)
+      )
+    ) %>%
+    filter(ok) %>%
+    arrange(priority)
+  
+  if (nrow(cand) == 0) return(NA_character_)
+  cand$destination_bucket[[1]]
+}
+
+#' Apply routing rules to the full posting plan.
+apply_routing <- function(posting_plan, routing_rules) {
+  posting_plan <- posting_plan %>%
+    rowwise() %>%
+    mutate(
+      destination_bucket = resolve_destination(
+        scenario_id, posting_line_type_id, is_medic, routing_rules
+      )
+    ) %>%
+    ungroup()
+  
+  if (any(is.na(posting_plan$destination_bucket))) {
+    bad <- posting_plan %>%
+      filter(is.na(destination_bucket)) %>%
+      distinct(scenario_id, posting_line_type_id)
+    stop("Missing routing for posting line: ",
+         bad$scenario_id[1], " / ", bad$posting_line_type_id[1])
+  }
+  
+  posting_plan
+}
+
+# ======================================================================
+# 7. Entity Resolution
+# ======================================================================
+
+#' Map destination buckets to logical entities.
+resolve_entities <- function(posting_plan) {
+  posting_plan %>%
+    mutate(
+      destination_entity = case_when(
+        destination_bucket == "DEST_PROVIDER" ~ provider_org,
+        destination_bucket == "DEST_PI_ORG"   ~ pi_org,
+        destination_bucket == "DEST_RD"       ~ "R&D",
+      destination_bucket == "DEST_TRUST_OH" ~ "TRUST_OVERHEAD",
+      destination_bucket == "DEST_SUPPORT"  ~ "SUPPORT_BUCKET",
+      destination_bucket == "DEST_MFF_SPLIT" ~ "MFF_SPLIT_CC",
+      TRUE                                  ~ "UNKNOWN"
+    ),
+      cost_code = NA_character_
+    )
+}
+
+# ======================================================================
+# 8. Final Output
+# ======================================================================
+
+#' Trim to canonical output columns and sort.
+#'
+#' Includes the corrected-schema columns so that any downstream consumer
+#' (EDGE import, reporting, etc.) can join unambiguously on
+#' (cpms_id, Visit, Study_Arm, Activity) -- never the old overloaded Visit_Name.
+select_output_cols <- function(posting_plan) {
+  if (!"study_site" %in% names(posting_plan)) {
+    posting_plan$study_site <- NA_character_
+  }
+  
+  # Core output columns (always present)
+  core <- c(
+    "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
+    "is_medic", "cpms_id", "study_site", "study_name", "Study_Arm", "Activity", "Visit",
+    "posting_line_type_id", "posting_amount",
+    "destination_bucket", "destination_entity", "cost_code"
+  )
+  
+  # Optional columns from corrected schema (present if pipeline_fixed.r was used)
+  posting_plan %>%
+    rename(
+      activity_type = any_of("Activity.Type"),
+      time_required = any_of("Time.Required")
+    ) %>%
+    select(all_of(c(
+      core,
+      intersect(
+        c("sheet_name", "Visit_Label", "activity_occurrence_id", "staff_group",
+          "contract_cost", "Department", "Staff.Role", "activity_type",
+          "time_required"),
+        names(.)
+      )
+    ))) %>%
+    arrange(row_id, posting_line_type_id)
+}
+
+# ======================================================================
+# Entry Point
+# ======================================================================
+
+#' Generate a long posting plan from ICT data and DuckDB finance rules.
+#'
+#' @param ict            Path to Stage B output .xlsx, OR a pre-loaded dataframe / named list.
+#' @param rules_db_path  Path to the finance rules DuckDB (dist_rules, amount_map, routing_rules).
+#' @param scenario_id    Scenario letter ("A" .. "H").
+#' @param ruleset_id     Ruleset identifier (default "COMM_AH_V1").
+#' @param mff_rate       MFF multiplier (default 1.08).
+#' @param mff_split_enabled Optional per-study toggle for the MFF split.
+#' @param mff_split_pct  Optional per-study MFF split percentage in [0, 1].
+#' @param ict_db_path    Optional. Path to the DuckDB containing ict_costing_tbl.
+#'                       If provided, contract costs are joined using the corrected
+#'                       composite key (CPMS_ID + Visit_Number + Study_Arm + Activity_Name).
+#'                       If NULL (default), contract_cost column is omitted.
+#' @param output_path    Optional. If provided, writes the result as CSV here.
+#' @return Dataframe: the long posting plan (returned invisibly).
+generate_posting_plan <- function(ict,
+                                  rules_db_path,
+                                  scenario_id,
+                                  ruleset_id  = "COMM_AH_V1",
+                                  mff_rate    = 1.08,
+                                  mff_split_enabled = FALSE,
+                                  mff_split_pct = 0,
+                                  ict_db_path = NULL,
+                                  output_path = NULL) {
+  df <- read_ict_workbook(ict)
+  df <- normalise_rows(df, scenario_id, ruleset_id)
+  if (!is.null(ict_db_path)) {
+    df <- join_ict_costs(df, ict_db_path)
+  }
+  rules <- load_rules(rules_db_path, ruleset_id)
+  plan <- apply_dist_rules(
+    df,
+    rules$dist_rules,
+    scenario_id,
+    mff_split_enabled = mff_split_enabled,
+    mff_split_pct = mff_split_pct
+  )
+  plan <- apply_amount_map(
+    plan,
+    rules$amount_map,
+    mff_rate,
+    mff_split_enabled = mff_split_enabled,
+    mff_split_pct = mff_split_pct
+  )
+  plan <- apply_routing(plan, rules$routing_rules)
+  plan <- resolve_entities(plan)
+  out <- select_output_cols(plan)
+  
+  if (!is.null(output_path)) {
+    write_csv(out, output_path)
+  }
+  invisible(out)
+}
+
+# -- CLI convenience -----------------------------------------------------------
+# Uncomment and set paths to run standalone:
+#
+# generate_posting_plan(
+#   ict           = "path/to/stage_b_output.xlsx",
+#   rules_db_path = "path/to/finance_rules_AH.duckdb",
+#   scenario_id   = "A",
+#   ict_db_path   = "path/to/ict_local.duckdb",    # optional: contract cost join
+#   output_path   = "path/to/posting_plan.csv"
+# )
+
+
+# -- Split Function's ---------------
+
+# Split 1
+prepare_posting_input <- function(ict,
+                                  scenario_id,
+                                  ruleset_id  = "COMM_AH_V1",
+                                  ict_db_path = NULL) {
+  df <- read_ict_workbook(ict)
+  df <- normalise_rows(df, scenario_id, ruleset_id)
+  if (!is.null(ict_db_path)) {
+    df <- join_ict_costs(df, ict_db_path)
+  }
+  df
+}
+
+# Split 2
+evaluate_posting_plan <- function(prepared_df,
+                                  rules_db_path,
+                                  scenario_id,
+                                  ruleset_id = "COMM_AH_V1",
+                                  mff_rate   = 1.08,
+                                  mff_split_enabled = FALSE,
+                                  mff_split_pct = 0,
+                                  output_path = NULL) {
+  
+  if (!is.data.frame(prepared_df)) {
+    stop("evaluate_posting_plan(): `prepared_df` must be a dataframe.")
+  }
+  
+  # Original script behaviour preserved:
+  # calc_tag is already cleaned/handled in normalise_rows(),
+  # and row_category is already set there too.
+  
+  rules <- load_rules(rules_db_path, ruleset_id)
+  plan <- apply_dist_rules(
+    prepared_df,
+    rules$dist_rules,
+    scenario_id,
+    mff_split_enabled = mff_split_enabled,
+    mff_split_pct = mff_split_pct
+  )
+  plan <- apply_amount_map(
+    plan,
+    rules$amount_map,
+    mff_rate,
+    mff_split_enabled = mff_split_enabled,
+    mff_split_pct = mff_split_pct
+  )
+  plan <- apply_routing(plan, rules$routing_rules)
+  plan <- resolve_entities(plan)
+  
+  out <- select_output_cols(plan)
+  
+  if (!is.null(output_path)) {
+    write_csv(out, output_path)
+  }
+  invisible(out)
+}

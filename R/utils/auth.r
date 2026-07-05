@@ -1,0 +1,749 @@
+hash_password <- function(pw) {
+  tryCatch({
+    sodium::password_store(pw)
+  }, error = function(e) {
+    app_log_exception("auth", "Password hashing failed", e)
+    NULL
+  })
+}
+
+verify_password <- function(pw, pw_hash) {
+  tryCatch({
+    isTRUE(sodium::password_verify(pw_hash, pw))
+  }, error = function(e) {
+    app_log_exception("auth", "Password verification failed", e)
+    FALSE
+  })
+}
+
+normalize_role <- function(role) {
+  role <- tolower(trimws(role %||% "user"))
+
+  if (role %in% c("dev", "developer")) {
+    return("developer")
+  }
+
+  if (role == "admin") {
+    return("admin")
+  }
+
+  "user"
+}
+
+is_admin <- function(role) {
+  identical(normalize_role(role), "admin")
+}
+
+is_manager <- function(role) {
+  normalize_role(role) %in% c("admin", "developer")
+}
+
+can_edit <- function(role) {
+  identical(normalize_role(role), "developer")
+}
+
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) {
+    return(y)
+  }
+
+  x
+}
+
+AUTH_COOKIE_NAME <- "rids_auth_token"
+
+session_duration_hours <- function() {
+  if (exists("AUTH_SESSION_HOURS", inherits = TRUE)) {
+    return(AUTH_SESSION_HOURS)
+  }
+
+  10
+}
+
+session_duration_seconds <- function() {
+  as.integer(session_duration_hours() * 60 * 60)
+}
+
+generate_session_token <- function() {
+  sodium::bin2hex(sodium::random(32))
+}
+
+hash_session_token <- function(token) {
+  sodium::bin2hex(sodium::hash(charToRaw(token)))
+}
+
+get_cookie_value <- function(cookie_header, cookie_name) {
+  if (is.null(cookie_header) || identical(cookie_header, "")) {
+    return("")
+  }
+
+  cookie_parts <- strsplit(cookie_header, ";", fixed = TRUE)[[1]]
+  cookie_parts <- trimws(cookie_parts)
+  cookie_prefix <- paste0(cookie_name, "=")
+  matched_cookie <- cookie_parts[startsWith(cookie_parts, cookie_prefix)]
+
+  if (length(matched_cookie) == 0) {
+    return("")
+  }
+
+  utils::URLdecode(sub(cookie_prefix, "", matched_cookie[[1]], fixed = TRUE))
+}
+
+sanitize_text_value <- function(x) {
+  if (is.null(x) || length(x) == 0 || is.na(x)) {
+    return(NA_character_)
+  }
+
+  x <- as.character(x)
+  vapply(x, function(value) {
+    raw_value <- charToRaw(enc2utf8(value))
+    raw_value <- raw_value[raw_value != as.raw(0)]
+    rawToChar(raw_value)
+  }, FUN.VALUE = character(1), USE.NAMES = FALSE)
+}
+
+users_exist <- function() {
+  tryCatch({
+    dbGetQuery(CON, "SELECT COUNT(*) AS n FROM users")$n[[1]] > 0
+  }, error = function(e) {
+    app_log_exception("auth", "User existence check failed", e)
+    FALSE
+  })
+}
+
+log_auth_event <- function(event_type,
+                           user_id = NULL,
+                           actor_user_id = NULL,
+                           username = NULL,
+                           success = TRUE,
+                           message = NULL,
+                           session_id = NULL) {
+  tryCatch({
+    user_id <- user_id %||% NA_integer_
+    actor_user_id <- actor_user_id %||% NA_integer_
+    username <- username %||% NA_character_
+    message <- message %||% NA_character_
+    session_id <- session_id %||% NA_integer_
+
+    dbExecute(
+      CON,
+      paste(
+        "INSERT INTO auth_audit_log",
+        "(event_type, user_id, actor_user_id, username, success, message, session_id)",
+        "VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ),
+      params = list(
+        event_type,
+        user_id,
+        actor_user_id,
+        username,
+        isTRUE(success),
+        message,
+        session_id
+      )
+    )
+
+    if (exists("log_event", mode = "function")) {
+      level <- if (isTRUE(success)) {
+        "INFO"
+      } else if (event_type %in% c("session_expired", "session_revoked")) {
+        "WARN"
+      } else {
+        "WARN"
+      }
+
+      log_event(
+        level = level,
+        area = "auth",
+        message = message %||% gsub("_", " ", event_type),
+        user_id = user_id,
+        username = username,
+        session_id = session_id,
+        details = list(
+          auth_event_type = event_type,
+          actor_user_id = actor_user_id,
+          success = isTRUE(success)
+        )
+      )
+    }
+  }, error = function(e) {
+    app_log_exception("auth", "Auth audit log write failed", e)
+  })
+}
+
+get_user_by_username <- function(username) {
+  tryCatch({
+    row <- dbGetQuery(
+      CON,
+      paste(
+        "SELECT user_id, name, username, email, password_hash, role, active,",
+        "force_password_change, created_at, updated_at, last_login_at",
+        "FROM users WHERE lower(username) = lower(?) LIMIT 1"
+      ),
+      params = list(username)
+    )
+
+    if (nrow(row) == 0) {
+      return(NULL)
+    }
+
+    row
+  }, error = function(e) {
+    app_log_exception("auth", "Lookup by username failed", e, list(username = username))
+    NULL
+  })
+}
+
+get_user_by_id <- function(user_id) {
+  tryCatch({
+    row <- dbGetQuery(
+      CON,
+      paste(
+        "SELECT user_id, name, username, email, password_hash, role, active,",
+        "force_password_change, created_at, updated_at, last_login_at",
+        "FROM users WHERE user_id = ? LIMIT 1"
+      ),
+      params = list(user_id)
+    )
+
+    if (nrow(row) == 0) {
+      return(NULL)
+    }
+
+    row
+  }, error = function(e) {
+    app_log_exception("auth", "Lookup by user id failed", e, list(user_id = user_id))
+    NULL
+  })
+}
+
+touch_last_login <- function(user_id) {
+  tryCatch({
+    dbExecute(
+      CON,
+      "UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+      params = list(user_id)
+    )
+  }, error = function(e) {
+    app_log_exception("auth", "Last login update failed", e, list(user_id = user_id))
+  })
+}
+
+create_auth_session <- function(user_id, user_agent = NULL, duration_hours = session_duration_hours()) {
+  token <- generate_session_token()
+  token_hash <- hash_session_token(token)
+  expires_at <- format(Sys.time() + (duration_hours * 60 * 60), "%Y-%m-%d %H:%M:%S")
+
+  dbExecute(
+    CON,
+    paste(
+      "INSERT INTO auth_sessions (user_id, token_hash, expires_at, user_agent)",
+      "VALUES (?, ?, ?, ?)"
+    ),
+    params = list(user_id, token_hash, expires_at, user_agent %||% NA_character_)
+  )
+
+  session_id <- dbGetQuery(CON, "SELECT currval('auth_session_id_seq') AS session_id")$session_id[[1]]
+
+  list(
+    session_id = session_id,
+    token = token,
+    max_age = as.integer(duration_hours * 60 * 60)
+  )
+}
+
+revoke_auth_session <- function(session_id, actor_user_id = NULL, event_type = "logout", message = "Session revoked") {
+  if (is.null(session_id) || is.na(session_id)) {
+    return(invisible(FALSE))
+  }
+
+  session_row <- dbGetQuery(
+    CON,
+    paste(
+      "SELECT s.session_id, s.user_id, u.username",
+      "FROM auth_sessions s",
+      "LEFT JOIN users u ON u.user_id = s.user_id",
+      "WHERE s.session_id = ? LIMIT 1"
+    ),
+    params = list(session_id)
+  )
+
+  dbExecute(
+    CON,
+    "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE session_id = ? AND revoked_at IS NULL",
+    params = list(session_id)
+  )
+
+  if (nrow(session_row) > 0) {
+    log_auth_event(
+      event_type = event_type,
+      user_id = session_row$user_id[[1]],
+      actor_user_id = actor_user_id %||% session_row$user_id[[1]],
+      username = session_row$username[[1]],
+      success = TRUE,
+      message = message,
+      session_id = session_id
+    )
+  }
+
+  invisible(TRUE)
+}
+
+restore_auth_session <- function(token) {
+  if (is.null(token) || identical(token, "")) {
+    return(list(success = FALSE, status = "missing"))
+  }
+
+  token_hash <- hash_session_token(token)
+
+  session_row <- dbGetQuery(
+    CON,
+    paste(
+      "SELECT s.session_id, s.user_id, s.expires_at, s.revoked_at, s.created_at, s.user_agent,",
+      "u.name, u.username, u.email, u.role, u.active, u.force_password_change",
+      "FROM auth_sessions s",
+      "JOIN users u ON u.user_id = s.user_id",
+      "WHERE s.token_hash = ?",
+      "ORDER BY s.created_at DESC LIMIT 1"
+    ),
+    params = list(token_hash)
+  )
+
+  if (nrow(session_row) == 0) {
+    return(list(success = FALSE, status = "invalid"))
+  }
+
+  row <- session_row[1, , drop = FALSE]
+  now <- Sys.time()
+  expires_at <- as.POSIXct(row$expires_at[[1]], tz = Sys.timezone())
+
+  if (!is.na(row$revoked_at[[1]])) {
+    log_auth_event(
+      event_type = "session_revoked",
+      user_id = row$user_id[[1]],
+      actor_user_id = row$user_id[[1]],
+      username = row$username[[1]],
+      success = FALSE,
+      message = "Attempted restore for revoked session",
+      session_id = row$session_id[[1]]
+    )
+    return(list(success = FALSE, status = "revoked", session = row))
+  }
+
+  if (is.na(expires_at) || expires_at <= now) {
+    log_auth_event(
+      event_type = "session_expired",
+      user_id = row$user_id[[1]],
+      actor_user_id = row$user_id[[1]],
+      username = row$username[[1]],
+      success = FALSE,
+      message = "Attempted restore for expired session",
+      session_id = row$session_id[[1]]
+    )
+    return(list(success = FALSE, status = "expired", session = row))
+  }
+
+  if (!isTRUE(row$active[[1]])) {
+    log_auth_event(
+      event_type = "session_revoked",
+      user_id = row$user_id[[1]],
+      actor_user_id = row$user_id[[1]],
+      username = row$username[[1]],
+      success = FALSE,
+      message = "Attempted restore for inactive user",
+      session_id = row$session_id[[1]]
+    )
+    return(list(success = FALSE, status = "inactive", session = row))
+  }
+
+  log_auth_event(
+    event_type = "session_restored",
+    user_id = row$user_id[[1]],
+    actor_user_id = row$user_id[[1]],
+    username = row$username[[1]],
+    success = TRUE,
+    message = "Session restored from cookie",
+    session_id = row$session_id[[1]]
+  )
+
+  list(success = TRUE, status = "ok", session = row)
+}
+
+authenticate_user <- function(username, password) {
+  user_row <- get_user_by_username(username)
+
+  if (is.null(user_row)) {
+    log_auth_event(
+      event_type = "login_failure",
+      username = username,
+      success = FALSE,
+      message = "Unknown username"
+    )
+    return(list(success = FALSE, reason = "invalid_credentials"))
+  }
+
+  row <- user_row[1, , drop = FALSE]
+
+  if (!isTRUE(row$active[[1]])) {
+    log_auth_event(
+      event_type = "login_failure",
+      user_id = row$user_id[[1]],
+      username = row$username[[1]],
+      success = FALSE,
+      message = "Inactive user"
+    )
+    return(list(success = FALSE, reason = "inactive"))
+  }
+
+  if (is.na(row$password_hash[[1]]) || identical(row$password_hash[[1]], "")) {
+    log_auth_event(
+      event_type = "login_failure",
+      user_id = row$user_id[[1]],
+      username = row$username[[1]],
+      success = FALSE,
+      message = "User has no password hash"
+    )
+    return(list(success = FALSE, reason = "invalid_credentials"))
+  }
+
+  if (!verify_password(password, row$password_hash[[1]])) {
+    log_auth_event(
+      event_type = "login_failure",
+      user_id = row$user_id[[1]],
+      username = row$username[[1]],
+      success = FALSE,
+      message = "Password verification failed"
+    )
+    return(list(success = FALSE, reason = "invalid_credentials"))
+  }
+
+  list(success = TRUE, user = row)
+}
+
+create_user_account <- function(name,
+                                username,
+                                email = NULL,
+                                role = "user",
+                                temporary_password,
+                                active = TRUE,
+                                actor_user_id = NULL) {
+  username <- trimws(username)
+  email <- trimws(email %||% "")
+  role <- normalize_role(role)
+  name <- trimws(name %||% "")
+
+  existing <- get_user_by_username(username)
+  if (!is.null(existing)) {
+    return(list(success = FALSE, message = "That username already exists."))
+  }
+
+  password_hash <- hash_password(temporary_password)
+  if (is.null(password_hash)) {
+    return(list(success = FALSE, message = "Failed to create password hash."))
+  }
+
+  dbExecute(
+    CON,
+    paste(
+      "INSERT INTO users",
+      "(name, username, email, password_hash, role, active, force_password_change)",
+      "VALUES (?, ?, ?, ?, ?, ?, TRUE)"
+    ),
+    params = list(
+      if (identical(name, "")) NA_character_ else name,
+      username,
+      if (identical(email, "")) NA_character_ else email,
+      password_hash,
+      role,
+      isTRUE(active)
+    )
+  )
+
+  user_id <- dbGetQuery(CON, "SELECT currval('user_id_seq') AS user_id")$user_id[[1]]
+  user_row <- get_user_by_id(user_id)
+
+  log_auth_event(
+    event_type = "user_created",
+    user_id = user_id,
+    actor_user_id = actor_user_id,
+    username = username,
+    success = TRUE,
+    message = paste("Role:", role)
+  )
+
+  list(success = TRUE, user = user_row, temporary_password = temporary_password)
+}
+
+update_user_account <- function(user_id,
+                                name,
+                                username,
+                                email,
+                                role,
+                                active,
+                                actor_user_id = NULL) {
+  current_user <- get_user_by_id(user_id)
+  if (is.null(current_user)) {
+    return(list(success = FALSE, message = "User not found."))
+  }
+
+  username <- trimws(username)
+  email <- trimws(email %||% "")
+  role <- normalize_role(role)
+  name <- trimws(name %||% "")
+
+  duplicate <- dbGetQuery(
+    CON,
+    "SELECT user_id FROM users WHERE lower(username) = lower(?) AND user_id <> ? LIMIT 1",
+    params = list(username, user_id)
+  )
+
+  if (nrow(duplicate) > 0) {
+    return(list(success = FALSE, message = "That username already exists."))
+  }
+
+  dbExecute(
+    CON,
+    paste(
+      "UPDATE users SET",
+      "name = ?, username = ?, email = ?, role = ?, active = ?, updated_at = CURRENT_TIMESTAMP",
+      "WHERE user_id = ?"
+    ),
+    params = list(
+      if (identical(name, "")) NA_character_ else name,
+      username,
+      if (identical(email, "")) NA_character_ else email,
+      role,
+      isTRUE(active),
+      user_id
+    )
+  )
+
+  current_active <- isTRUE(current_user$active[[1]])
+  new_active <- isTRUE(active)
+
+  if (current_active != new_active) {
+    log_auth_event(
+      event_type = if (new_active) "user_reactivated" else "user_deactivated",
+      user_id = user_id,
+      actor_user_id = actor_user_id,
+      username = username,
+      success = TRUE,
+      message = if (new_active) "User reactivated" else "User deactivated"
+    )
+  }
+
+  list(success = TRUE, user = get_user_by_id(user_id))
+}
+
+set_user_active <- function(user_id, active, actor_user_id = NULL) {
+  current_user <- get_user_by_id(user_id)
+  if (is.null(current_user)) {
+    return(list(success = FALSE, message = "User not found."))
+  }
+
+  dbExecute(
+    CON,
+    "UPDATE users SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+    params = list(isTRUE(active), user_id)
+  )
+
+  if (!isTRUE(active)) {
+    dbExecute(
+      CON,
+      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL",
+      params = list(user_id)
+    )
+  }
+
+  log_auth_event(
+    event_type = if (isTRUE(active)) "user_reactivated" else "user_deactivated",
+    user_id = user_id,
+    actor_user_id = actor_user_id,
+    username = current_user$username[[1]],
+    success = TRUE,
+    message = if (isTRUE(active)) "User reactivated" else "User deactivated"
+  )
+
+  list(success = TRUE, user = get_user_by_id(user_id))
+}
+
+reset_user_password <- function(user_id, temporary_password, actor_user_id = NULL) {
+  user_row <- get_user_by_id(user_id)
+  if (is.null(user_row)) {
+    return(list(success = FALSE, message = "User not found."))
+  }
+
+  password_hash <- hash_password(temporary_password)
+  if (is.null(password_hash)) {
+    return(list(success = FALSE, message = "Failed to reset password."))
+  }
+
+  dbExecute(
+    CON,
+    paste(
+      "UPDATE users SET password_hash = ?, force_password_change = TRUE,",
+      "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?"
+    ),
+    params = list(password_hash, user_id)
+  )
+
+  dbExecute(
+    CON,
+    paste(
+      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP",
+      "WHERE user_id = ? AND revoked_at IS NULL"
+    ),
+    params = list(user_id)
+  )
+
+  log_auth_event(
+    event_type = "admin_password_reset",
+    user_id = user_id,
+    actor_user_id = actor_user_id,
+    username = user_row$username[[1]],
+    success = TRUE,
+    message = "Temporary password issued"
+  )
+
+  list(success = TRUE, temporary_password = temporary_password, user = get_user_by_id(user_id))
+}
+
+reset_user_password_by_username <- function(username, new_password) {
+  user_row <- get_user_by_username(username)
+  if (is.null(user_row)) {
+    return(list(success = FALSE, message = "User not found."))
+  }
+
+  row <- user_row[1, , drop = FALSE]
+
+  if (!isTRUE(row$active[[1]])) {
+    return(list(success = FALSE, message = "User is inactive."))
+  }
+
+  password_hash <- hash_password(new_password)
+  if (is.null(password_hash)) {
+    return(list(success = FALSE, message = "Failed to reset password."))
+  }
+
+  dbExecute(
+    CON,
+    paste(
+      "UPDATE users SET password_hash = ?, force_password_change = FALSE,",
+      "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?"
+    ),
+    params = list(password_hash, row$user_id[[1]])
+  )
+
+  dbExecute(
+    CON,
+    paste(
+      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP",
+      "WHERE user_id = ? AND revoked_at IS NULL"
+    ),
+    params = list(row$user_id[[1]])
+  )
+
+  log_auth_event(
+    event_type = "self_service_password_reset_insecure",
+    user_id = row$user_id[[1]],
+    actor_user_id = row$user_id[[1]],
+    username = row$username[[1]],
+    success = TRUE,
+    message = "Username-only password reset completed"
+  )
+
+  list(success = TRUE, user = get_user_by_id(row$user_id[[1]]))
+}
+
+change_user_password <- function(user_id,
+                                 current_password,
+                                 new_password,
+                                 actor_user_id = NULL) {
+  user_row <- get_user_by_id(user_id)
+  if (is.null(user_row)) {
+    return(list(success = FALSE, message = "User not found."))
+  }
+
+  if (!verify_password(current_password, user_row$password_hash[[1]])) {
+    log_auth_event(
+      event_type = "password_change",
+      user_id = user_id,
+      actor_user_id = actor_user_id %||% user_id,
+      username = user_row$username[[1]],
+      success = FALSE,
+      message = "Current password verification failed"
+    )
+    return(list(success = FALSE, message = "Current password is incorrect."))
+  }
+
+  password_hash <- hash_password(new_password)
+  if (is.null(password_hash)) {
+    return(list(success = FALSE, message = "Failed to update password."))
+  }
+
+  dbExecute(
+    CON,
+    paste(
+      "UPDATE users SET password_hash = ?, force_password_change = FALSE,",
+      "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?"
+    ),
+    params = list(password_hash, user_id)
+  )
+
+  log_auth_event(
+    event_type = "password_changed",
+    user_id = user_id,
+    actor_user_id = actor_user_id %||% user_id,
+    username = user_row$username[[1]],
+    success = TRUE,
+    message = "Password changed successfully"
+  )
+
+  list(success = TRUE, user = get_user_by_id(user_id))
+}
+
+bootstrap_admin_account <- function(name, username, password) {
+  if (users_exist()) {
+    return(list(success = FALSE, message = "An account already exists."))
+  }
+
+  password_hash <- hash_password(password)
+  if (is.null(password_hash)) {
+    return(list(success = FALSE, message = "Failed to create admin account."))
+  }
+
+  dbExecute(
+    CON,
+    paste(
+      "INSERT INTO users",
+      "(name, username, password_hash, role, active, force_password_change)",
+      "VALUES (?, ?, ?, 'admin', TRUE, FALSE)"
+    ),
+    params = list(trimws(name), trimws(username), password_hash)
+  )
+
+  user_id <- dbGetQuery(CON, "SELECT currval('user_id_seq') AS user_id")$user_id[[1]]
+  touch_last_login(user_id)
+
+  log_auth_event(
+    event_type = "user_created",
+    user_id = user_id,
+    actor_user_id = user_id,
+    username = username,
+    success = TRUE,
+    message = "Initial admin account created"
+  )
+
+  list(success = TRUE, user = get_user_by_id(user_id))
+}
+
+list_users_for_admin <- function() {
+  dbGetQuery(
+    CON,
+    paste(
+      "SELECT user_id, name, username, email, role, active, force_password_change,",
+      "created_at, updated_at, last_login_at",
+      "FROM users ORDER BY created_at DESC, username ASC"
+    )
+  )
+}
