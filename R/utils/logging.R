@@ -169,17 +169,6 @@ normalize_log_level <- function(level) {
   level
 }
 
-current_storage_mode <- function() {
-  mode <- tryCatch(APP_CONFIG$storage_mode, error = function(e) NULL)
-  mode <- tolower(trimws(as.character(mode %||% "duckdb")))
-
-  if (!nzchar(mode)) {
-    mode <- "duckdb"
-  }
-
-  mode
-}
-
 sanitize_log_value <- function(x) {
   if (is.null(x) || length(x) == 0 || all(is.na(x))) {
     return(NA_character_)
@@ -225,17 +214,13 @@ log_event <- function(level,
 
 get_app_setting_value <- function(key, default = NULL) {
   tryCatch({
-    row <- DBI::dbGetQuery(
-      CON,
-      "SELECT value FROM app_settings WHERE key = ?",
-      params = list(key)
-    )
+    value <- rids_repos()$settings$find_value(key)
 
-    if (nrow(row) == 0) {
+    if (length(value) == 0) {
       return(default)
     }
 
-    row$value[[1]]
+    value
   }, error = function(e) {
     message("get_app_setting_value error: ", conditionMessage(e))
     default
@@ -244,26 +229,7 @@ get_app_setting_value <- function(key, default = NULL) {
 
 set_app_setting_value <- function(key, value) {
   tryCatch({
-    existing <- DBI::dbGetQuery(
-      CON,
-      "SELECT COUNT(*) AS n FROM app_settings WHERE key = ?",
-      params = list(key)
-    )$n[[1]]
-
-    if (existing > 0) {
-      DBI::dbExecute(
-        CON,
-        "UPDATE app_settings SET value = ? WHERE key = ?",
-        params = list(as.character(value), key)
-      )
-    } else {
-      DBI::dbExecute(
-        CON,
-        "INSERT INTO app_settings (key, value) VALUES (?, ?)",
-        params = list(key, as.character(value))
-      )
-    }
-
+    rids_repos()$settings$set(key, value)
     invisible(TRUE)
   }, error = function(e) {
     message("set_app_setting_value error: ", conditionMessage(e))
@@ -327,39 +293,8 @@ query_app_logs <- function(date_from = NULL,
     params <- c(params, list(trimws(upload_id)))
   }
 
-  sql <- if (!is.null(limit) &&
-             is.finite(limit) &&
-             limit > 0 &&
-             identical(current_storage_mode(), "sqlserver")) {
-    paste(
-      "SELECT TOP (", as.integer(limit), ")",
-      "log_id, timestamp, level, area, message, user_id, username, session_id,",
-      "cpms_id, upload_id, details_json, app_version",
-      "FROM app_logs"
-    )
-  } else {
-    paste(
-      "SELECT log_id, timestamp, level, area, message, user_id, username, session_id,",
-      "cpms_id, upload_id, details_json, app_version",
-      "FROM app_logs"
-    )
-  }
-
-  if (length(where) > 0) {
-    sql <- paste(sql, "WHERE", paste(where, collapse = " AND "))
-  }
-
-  sql <- paste(sql, "ORDER BY timestamp DESC, log_id DESC")
-
-  if (!is.null(limit) &&
-      is.finite(limit) &&
-      limit > 0 &&
-      !identical(current_storage_mode(), "sqlserver")) {
-    sql <- paste(sql, "LIMIT", as.integer(limit))
-  }
-
   tryCatch({
-    DBI::dbGetQuery(CON, sql, params = params)
+    rids_repos()$app_logs$query(where = where, params = params, limit = limit)
   }, error = function(e) {
     message("query_app_logs error: ", conditionMessage(e))
     data.frame()
@@ -371,20 +306,8 @@ get_recent_app_logs <- function(limit = 1000L) {
 }
 
 list_app_log_filter_values <- function(column) {
-  allowed <- c("level", "area", "username")
-  if (!column %in% allowed) {
-    return(character())
-  }
-
-  sql <- paste0(
-    "SELECT DISTINCT ", column, " FROM app_logs ",
-    "WHERE ", column, " IS NOT NULL AND trim(", column, ") <> '' ",
-    "ORDER BY ", column
-  )
-
   tryCatch({
-    vals <- DBI::dbGetQuery(CON, sql)[[1]]
-    vals[!is.na(vals) & nzchar(vals)]
+    rids_repos()$app_logs$distinct_values(column)
   }, error = function(e) {
     message("list_app_log_filter_values error: ", conditionMessage(e))
     character()
@@ -400,13 +323,7 @@ prune_app_logs <- function(retention_days = get_log_retention_days()) {
   cutoff <- format(Sys.time() - retention_days * 24 * 60 * 60, "%Y-%m-%d %H:%M:%S")
 
   tryCatch({
-    deleted <- DBI::dbExecute(
-      CON,
-      "DELETE FROM app_logs WHERE timestamp < ?",
-      params = list(cutoff)
-    )
-
-    invisible(as.integer(deleted))
+    invisible(rids_repos()$app_logs$prune_before(cutoff))
   }, error = function(e) {
     message("prune_app_logs error: ", conditionMessage(e))
     stop(e)

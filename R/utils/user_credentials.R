@@ -69,24 +69,7 @@ mask_api_secret <- function(secret) {
 
 get_user_api_credential_row <- function(user_id, provider) {
   provider <- normalize_credential_provider(provider)
-
-  rows <- DBI::dbGetQuery(
-    CON,
-    paste(
-      "SELECT credential_id, user_id, provider, secret_ciphertext, secret_nonce,",
-      "created_at, updated_at",
-      "FROM user_api_credentials",
-      "WHERE user_id = ? AND provider = ?",
-      "LIMIT 1"
-    ),
-    params = list(as.integer(user_id), provider)
-  )
-
-  if (nrow(rows) == 0) {
-    return(NULL)
-  }
-
-  rows[1, , drop = FALSE]
+  rids_repos()$credentials$find(user_id, provider)
 }
 
 save_user_api_credential <- function(user_id, provider, secret) {
@@ -113,33 +96,17 @@ save_user_api_credential <- function(user_id, provider, secret) {
     existing <- get_user_api_credential_row(user_id, provider)
 
     if (is.null(existing)) {
-      DBI::dbExecute(
-        CON,
-        paste(
-          "INSERT INTO user_api_credentials",
-          "(user_id, provider, secret_ciphertext, secret_nonce)",
-          "VALUES (?, ?, ?, ?)"
-        ),
-        params = list(
-          as.integer(user_id),
-          provider,
-          encrypted$secret_ciphertext,
-          encrypted$secret_nonce
-        )
+      rids_repos()$credentials$insert(
+        user_id = user_id,
+        provider = provider,
+        secret_ciphertext = encrypted$secret_ciphertext,
+        secret_nonce = encrypted$secret_nonce
       )
     } else {
-      DBI::dbExecute(
-        CON,
-        paste(
-          "UPDATE user_api_credentials",
-          "SET secret_ciphertext = ?, secret_nonce = ?, updated_at = CURRENT_TIMESTAMP",
-          "WHERE credential_id = ?"
-        ),
-        params = list(
-          encrypted$secret_ciphertext,
-          encrypted$secret_nonce,
-          existing$credential_id[[1]]
-        )
+      rids_repos()$credentials$update_secret(
+        credential_id = existing$credential_id[[1]],
+        secret_ciphertext = encrypted$secret_ciphertext,
+        secret_nonce = encrypted$secret_nonce
       )
     }
 
@@ -187,11 +154,7 @@ delete_user_api_credential <- function(user_id, provider) {
   provider <- normalize_credential_provider(provider)
 
   tryCatch({
-    deleted <- DBI::dbExecute(
-      CON,
-      "DELETE FROM user_api_credentials WHERE user_id = ? AND provider = ?",
-      params = list(as.integer(user_id), provider)
-    )
+    deleted <- rids_repos()$credentials$delete(user_id, provider)
 
     if (deleted > 0) {
       log_event(

@@ -1,3 +1,15 @@
+# Authentication: password hashing, roles, sessions, user accounts.
+# All database access goes through the repositories in
+# R/persistence/repositories/ (via the rids_repos() accessor).
+
+source("R/persistence/connection.R", local = FALSE)
+source("R/persistence/repositories/settings_repository.R", local = FALSE)
+source("R/persistence/repositories/app_log_repository.R", local = FALSE)
+source("R/persistence/repositories/api_credential_repository.R", local = FALSE)
+source("R/persistence/repositories/user_repository.R", local = FALSE)
+source("R/persistence/repositories/session_repository.R", local = FALSE)
+source("R/persistence/repositories/auth_audit_repository.R", local = FALSE)
+
 hash_password <- function(pw) {
   tryCatch({
     sodium::password_store(pw)
@@ -104,7 +116,7 @@ sanitize_text_value <- function(x) {
 
 users_exist <- function() {
   tryCatch({
-    dbGetQuery(CON, "SELECT COUNT(*) AS n FROM users")$n[[1]] > 0
+    rids_repos()$users$count() > 0
   }, error = function(e) {
     app_log_exception("auth", "User existence check failed", e)
     FALSE
@@ -125,22 +137,14 @@ log_auth_event <- function(event_type,
     message <- message %||% NA_character_
     session_id <- session_id %||% NA_integer_
 
-    dbExecute(
-      CON,
-      paste(
-        "INSERT INTO auth_audit_log",
-        "(event_type, user_id, actor_user_id, username, success, message, session_id)",
-        "VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ),
-      params = list(
-        event_type,
-        user_id,
-        actor_user_id,
-        username,
-        isTRUE(success),
-        message,
-        session_id
-      )
+    rids_repos()$auth_audit$record(
+      event_type = event_type,
+      user_id = user_id,
+      actor_user_id = actor_user_id,
+      username = username,
+      success = success,
+      message = message,
+      session_id = session_id
     )
 
     if (exists("log_event", mode = "function")) {
@@ -173,21 +177,7 @@ log_auth_event <- function(event_type,
 
 get_user_by_username <- function(username) {
   tryCatch({
-    row <- dbGetQuery(
-      CON,
-      paste(
-        "SELECT user_id, name, username, email, password_hash, role, active,",
-        "force_password_change, created_at, updated_at, last_login_at",
-        "FROM users WHERE lower(username) = lower(?) LIMIT 1"
-      ),
-      params = list(username)
-    )
-
-    if (nrow(row) == 0) {
-      return(NULL)
-    }
-
-    row
+    rids_repos()$users$find_by_username(username)
   }, error = function(e) {
     app_log_exception("auth", "Lookup by username failed", e, list(username = username))
     NULL
@@ -196,21 +186,7 @@ get_user_by_username <- function(username) {
 
 get_user_by_id <- function(user_id) {
   tryCatch({
-    row <- dbGetQuery(
-      CON,
-      paste(
-        "SELECT user_id, name, username, email, password_hash, role, active,",
-        "force_password_change, created_at, updated_at, last_login_at",
-        "FROM users WHERE user_id = ? LIMIT 1"
-      ),
-      params = list(user_id)
-    )
-
-    if (nrow(row) == 0) {
-      return(NULL)
-    }
-
-    row
+    rids_repos()$users$find_by_id(user_id)
   }, error = function(e) {
     app_log_exception("auth", "Lookup by user id failed", e, list(user_id = user_id))
     NULL
@@ -219,11 +195,7 @@ get_user_by_id <- function(user_id) {
 
 touch_last_login <- function(user_id) {
   tryCatch({
-    dbExecute(
-      CON,
-      "UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-      params = list(user_id)
-    )
+    rids_repos()$users$touch_last_login(user_id)
   }, error = function(e) {
     app_log_exception("auth", "Last login update failed", e, list(user_id = user_id))
   })
@@ -234,16 +206,12 @@ create_auth_session <- function(user_id, user_agent = NULL, duration_hours = ses
   token_hash <- hash_session_token(token)
   expires_at <- format(Sys.time() + (duration_hours * 60 * 60), "%Y-%m-%d %H:%M:%S")
 
-  dbExecute(
-    CON,
-    paste(
-      "INSERT INTO auth_sessions (user_id, token_hash, expires_at, user_agent)",
-      "VALUES (?, ?, ?, ?)"
-    ),
-    params = list(user_id, token_hash, expires_at, user_agent %||% NA_character_)
+  session_id <- rids_repos()$sessions$insert(
+    user_id = user_id,
+    token_hash = token_hash,
+    expires_at = expires_at,
+    user_agent = user_agent %||% NA_character_
   )
-
-  session_id <- dbGetQuery(CON, "SELECT currval('auth_session_id_seq') AS session_id")$session_id[[1]]
 
   list(
     session_id = session_id,
@@ -257,22 +225,9 @@ revoke_auth_session <- function(session_id, actor_user_id = NULL, event_type = "
     return(invisible(FALSE))
   }
 
-  session_row <- dbGetQuery(
-    CON,
-    paste(
-      "SELECT s.session_id, s.user_id, u.username",
-      "FROM auth_sessions s",
-      "LEFT JOIN users u ON u.user_id = s.user_id",
-      "WHERE s.session_id = ? LIMIT 1"
-    ),
-    params = list(session_id)
-  )
+  session_row <- rids_repos()$sessions$find_brief(session_id)
 
-  dbExecute(
-    CON,
-    "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE session_id = ? AND revoked_at IS NULL",
-    params = list(session_id)
-  )
+  rids_repos()$sessions$revoke(session_id)
 
   if (nrow(session_row) > 0) {
     log_auth_event(
@@ -296,18 +251,7 @@ restore_auth_session <- function(token) {
 
   token_hash <- hash_session_token(token)
 
-  session_row <- dbGetQuery(
-    CON,
-    paste(
-      "SELECT s.session_id, s.user_id, s.expires_at, s.revoked_at, s.created_at, s.user_agent,",
-      "u.name, u.username, u.email, u.role, u.active, u.force_password_change",
-      "FROM auth_sessions s",
-      "JOIN users u ON u.user_id = s.user_id",
-      "WHERE s.token_hash = ?",
-      "ORDER BY s.created_at DESC LIMIT 1"
-    ),
-    params = list(token_hash)
-  )
+  session_row <- rids_repos()$sessions$find_by_token_hash(token_hash)
 
   if (nrow(session_row) == 0) {
     return(list(success = FALSE, status = "invalid"))
@@ -442,24 +386,15 @@ create_user_account <- function(name,
     return(list(success = FALSE, message = "Failed to create password hash."))
   }
 
-  dbExecute(
-    CON,
-    paste(
-      "INSERT INTO users",
-      "(name, username, email, password_hash, role, active, force_password_change)",
-      "VALUES (?, ?, ?, ?, ?, ?, TRUE)"
-    ),
-    params = list(
-      if (identical(name, "")) NA_character_ else name,
-      username,
-      if (identical(email, "")) NA_character_ else email,
-      password_hash,
-      role,
-      isTRUE(active)
-    )
+  user_id <- rids_repos()$users$insert(
+    name = if (identical(name, "")) NA_character_ else name,
+    username = username,
+    email = if (identical(email, "")) NA_character_ else email,
+    password_hash = password_hash,
+    role = role,
+    active = active,
+    force_password_change = TRUE
   )
-
-  user_id <- dbGetQuery(CON, "SELECT currval('user_id_seq') AS user_id")$user_id[[1]]
   user_row <- get_user_by_id(user_id)
 
   log_auth_event(
@@ -491,31 +426,17 @@ update_user_account <- function(user_id,
   role <- normalize_role(role)
   name <- trimws(name %||% "")
 
-  duplicate <- dbGetQuery(
-    CON,
-    "SELECT user_id FROM users WHERE lower(username) = lower(?) AND user_id <> ? LIMIT 1",
-    params = list(username, user_id)
-  )
-
-  if (nrow(duplicate) > 0) {
+  if (rids_repos()$users$username_taken_by_other(username, user_id)) {
     return(list(success = FALSE, message = "That username already exists."))
   }
 
-  dbExecute(
-    CON,
-    paste(
-      "UPDATE users SET",
-      "name = ?, username = ?, email = ?, role = ?, active = ?, updated_at = CURRENT_TIMESTAMP",
-      "WHERE user_id = ?"
-    ),
-    params = list(
-      if (identical(name, "")) NA_character_ else name,
-      username,
-      if (identical(email, "")) NA_character_ else email,
-      role,
-      isTRUE(active),
-      user_id
-    )
+  rids_repos()$users$update_account(
+    user_id = user_id,
+    name = if (identical(name, "")) NA_character_ else name,
+    username = username,
+    email = if (identical(email, "")) NA_character_ else email,
+    role = role,
+    active = active
   )
 
   current_active <- isTRUE(current_user$active[[1]])
@@ -541,18 +462,10 @@ set_user_active <- function(user_id, active, actor_user_id = NULL) {
     return(list(success = FALSE, message = "User not found."))
   }
 
-  dbExecute(
-    CON,
-    "UPDATE users SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
-    params = list(isTRUE(active), user_id)
-  )
+  rids_repos()$users$set_active(user_id, active)
 
   if (!isTRUE(active)) {
-    dbExecute(
-      CON,
-      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL",
-      params = list(user_id)
-    )
+    rids_repos()$sessions$revoke_all_for_user(user_id)
   }
 
   log_auth_event(
@@ -578,23 +491,8 @@ reset_user_password <- function(user_id, temporary_password, actor_user_id = NUL
     return(list(success = FALSE, message = "Failed to reset password."))
   }
 
-  dbExecute(
-    CON,
-    paste(
-      "UPDATE users SET password_hash = ?, force_password_change = TRUE,",
-      "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?"
-    ),
-    params = list(password_hash, user_id)
-  )
-
-  dbExecute(
-    CON,
-    paste(
-      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP",
-      "WHERE user_id = ? AND revoked_at IS NULL"
-    ),
-    params = list(user_id)
-  )
+  rids_repos()$users$set_password_hash(user_id, password_hash, force_password_change = TRUE)
+  rids_repos()$sessions$revoke_all_for_user(user_id)
 
   log_auth_event(
     event_type = "admin_password_reset",
@@ -625,23 +523,8 @@ reset_user_password_by_username <- function(username, new_password) {
     return(list(success = FALSE, message = "Failed to reset password."))
   }
 
-  dbExecute(
-    CON,
-    paste(
-      "UPDATE users SET password_hash = ?, force_password_change = FALSE,",
-      "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?"
-    ),
-    params = list(password_hash, row$user_id[[1]])
-  )
-
-  dbExecute(
-    CON,
-    paste(
-      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP",
-      "WHERE user_id = ? AND revoked_at IS NULL"
-    ),
-    params = list(row$user_id[[1]])
-  )
+  rids_repos()$users$set_password_hash(row$user_id[[1]], password_hash, force_password_change = FALSE)
+  rids_repos()$sessions$revoke_all_for_user(row$user_id[[1]])
 
   log_auth_event(
     event_type = "self_service_password_reset_insecure",
@@ -681,14 +564,7 @@ change_user_password <- function(user_id,
     return(list(success = FALSE, message = "Failed to update password."))
   }
 
-  dbExecute(
-    CON,
-    paste(
-      "UPDATE users SET password_hash = ?, force_password_change = FALSE,",
-      "updated_at = CURRENT_TIMESTAMP WHERE user_id = ?"
-    ),
-    params = list(password_hash, user_id)
-  )
+  rids_repos()$users$set_password_hash(user_id, password_hash, force_password_change = FALSE)
 
   log_auth_event(
     event_type = "password_changed",
@@ -712,17 +588,15 @@ bootstrap_admin_account <- function(name, username, password) {
     return(list(success = FALSE, message = "Failed to create admin account."))
   }
 
-  dbExecute(
-    CON,
-    paste(
-      "INSERT INTO users",
-      "(name, username, password_hash, role, active, force_password_change)",
-      "VALUES (?, ?, ?, 'admin', TRUE, FALSE)"
-    ),
-    params = list(trimws(name), trimws(username), password_hash)
+  user_id <- rids_repos()$users$insert(
+    name = trimws(name),
+    username = trimws(username),
+    email = NA_character_,
+    password_hash = password_hash,
+    role = "admin",
+    active = TRUE,
+    force_password_change = FALSE
   )
-
-  user_id <- dbGetQuery(CON, "SELECT currval('user_id_seq') AS user_id")$user_id[[1]]
   touch_last_login(user_id)
 
   log_auth_event(
@@ -738,12 +612,5 @@ bootstrap_admin_account <- function(name, username, password) {
 }
 
 list_users_for_admin <- function() {
-  dbGetQuery(
-    CON,
-    paste(
-      "SELECT user_id, name, username, email, role, active, force_password_change,",
-      "created_at, updated_at, last_login_at",
-      "FROM users ORDER BY created_at DESC, username ASC"
-    )
-  )
+  rids_repos()$users$list_all()
 }

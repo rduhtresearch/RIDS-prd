@@ -185,11 +185,7 @@ adminServer <- function(id, auth_state) {
       req(input$ict_dir != "")
 
       tryCatch({
-        dbExecute(
-          CON,
-          "UPDATE app_settings SET value = ? WHERE key = 'ict_upload_dir'",
-          params = list(input$ict_dir)
-        )
+        set_app_setting_value("ict_upload_dir", input$ict_dir)
 
         ICT_UPLOAD_DIR <<- input$ict_dir
         log_event(
@@ -212,11 +208,7 @@ adminServer <- function(id, auth_state) {
       req(input$edge_dir != "")
 
       tryCatch({
-        dbExecute(
-          CON,
-          "UPDATE app_settings SET value = ? WHERE key = 'edge_output_dir'",
-          params = list(input$edge_dir)
-        )
+        set_app_setting_value("edge_output_dir", input$edge_dir)
         EDGE_OUTPUT_DIR <<- input$edge_dir
         log_event(
           level = "INFO",
@@ -257,11 +249,7 @@ adminServer <- function(id, auth_state) {
         saved_path <- file.path(matrix_dir, "active_cost_centre_matrix.csv")
         file.copy(upload$datapath, saved_path, overwrite = TRUE)
 
-        dbExecute(
-          CON,
-          "UPDATE app_settings SET value = ? WHERE key = 'cost_centre_matrix_file'",
-          params = list(saved_path)
-        )
+        set_app_setting_value("cost_centre_matrix_file", saved_path)
 
         log_event(
           level = "INFO",

@@ -45,18 +45,10 @@ app_log_info("startup", "Primary database connected")
 
 # Load paths from DB settings (admin may have updated them); fall back to config values
 ICT_UPLOAD_DIR_DEFAULT <- ICT_UPLOAD_DIR
-
-ICT_UPLOAD_DIR <- tryCatch({
-  val <- dbGetQuery(CON, "SELECT value FROM app_settings WHERE key = 'ict_upload_dir'")
-  if (nrow(val) > 0) val$value else ICT_UPLOAD_DIR_DEFAULT
-}, error = function(e) ICT_UPLOAD_DIR_DEFAULT)
+ICT_UPLOAD_DIR <- get_app_setting_value("ict_upload_dir", ICT_UPLOAD_DIR_DEFAULT)
 
 EDGE_OUTPUT_DIR_DEFAULT <- EDGE_OUTPUT_DIR
-
-EDGE_OUTPUT_DIR <- tryCatch({
-  val <- dbGetQuery(CON, "SELECT value FROM app_settings WHERE key = 'edge_output_dir'")
-  if (nrow(val) > 0) val$value else EDGE_OUTPUT_DIR_DEFAULT
-}, error = function(e) EDGE_OUTPUT_DIR_DEFAULT)
+EDGE_OUTPUT_DIR <- get_app_setting_value("edge_output_dir", EDGE_OUTPUT_DIR_DEFAULT)
 db_main()
 # ==============================================================================
 # SHINY SESSION CLEANUP
