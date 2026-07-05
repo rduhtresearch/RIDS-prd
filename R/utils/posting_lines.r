@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # generate_posting_plan.R
 #
-# Refactored from posting_test.r (02_generate_posting_plan_AH.R).
+# Refactored from posting_engine.r, formerly named posting_test.r (02_generate_posting_plan_AH.R).
 #
 # Context — the "join issue" in the old system:
 #   join_testv10.R built an ict_cost_table with an overloaded `Visit_Name` column:
@@ -25,7 +25,7 @@
 # corrected composite key (CPMS_ID + study_site + scenario_id + Visit_Number + Study_Arm + Activity_Name) —
 # the key that the old system could never get right with the overloaded Visit_Name.
 #
-# What changed vs the linear posting_test.r:
+# What changed vs the linear posting_engine.r:
 #   - All hardcoded paths removed; everything parameterised.
 #   - Linear body -> composable functions with a single entry point.
 #   - Debug artefacts removed (View(), test_id TRAINING_FEE hack).
