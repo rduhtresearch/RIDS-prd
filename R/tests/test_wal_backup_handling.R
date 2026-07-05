@@ -120,10 +120,7 @@ run_wal_backup_handling_tests <- function() {
     credential_secret = paste(rep("wal-test-secret", 2), collapse = "-"),
     app_log_dir = normalizePath(file.path(temp_root, "logs"), winslash = "/", mustWork = FALSE),
     app_host = "127.0.0.1",
-    app_port = 3838L,
-    sql_server = "",
-    sql_database = "",
-    sql_driver = ""
+    app_port = 3838L
   )
   dir.create(config$ict_upload_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(config$edge_output_dir, recursive = TRUE, showWarnings = FALSE)

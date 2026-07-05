@@ -34,11 +34,6 @@ APP_HOST <- "127.0.0.1"
 APP_PORT <- 3838L
 APP_STATUS <- "live"
 
-# Reserved for a future SQL Server migration.
-SQL_SERVER <- ""
-SQL_DATABASE <- ""
-SQL_DRIVER <- ""
-
 existing_credential_secret <- ""
 if (file.exists(file.path(SHARED_DIR, "deployment_config.R"))) {
   existing_cfg_env <- new.env(parent = baseenv())
@@ -129,10 +124,7 @@ config <- list(
   app_status = APP_STATUS,
   app_log_dir = normalizePath(APP_LOG_DIR, winslash = "/", mustWork = FALSE),
   app_host = APP_HOST,
-  app_port = as.integer(APP_PORT),
-  sql_server = SQL_SERVER,
-  sql_database = SQL_DATABASE,
-  sql_driver = SQL_DRIVER
+  app_port = as.integer(APP_PORT)
 )
 
 write_deployment_config(deployment_config_path, config)

@@ -60,3 +60,49 @@ suite (it previously returned nothing).
   before and after the changes.
 - testthat suite (`Rscript tests/testthat.R`): green, wrapping all 18 legacy
   suites plus the new characterization/startup tests.
+
+## Phase 1 — Project structure + env-var config
+
+Goal: dependency declaration, a single source manifest, and
+environment-variable-first configuration. No business logic touched.
+
+### Added
+
+- `DESCRIPTION` — declares all runtime dependencies with minimum versions
+  (pinned from a verified working environment, R 4.4). Used by tooling
+  (renv, Docker builds); the app itself is still a sourced Shiny app, not an
+  installed package. A full `renv.lock` is deferred to the Docker phase
+  (Phase 4), where it can be generated against CRAN during the image build.
+- `R/load_app.R` — the single manifest of app source files in load order.
+  `global.R` calls `rids_source_utils()`; `app.R` calls
+  `rids_source_modules()`. Replaces 20+ scattered `source()` lines in
+  `global.R` and 18 in `app.R`. Order preserved exactly.
+- `R/config/runtime_config.R` — `load_app_config()`: every config key reads
+  from a `RIDS_*` environment variable first, then falls back to the legacy
+  `deployment_config.R` file (located by the existing candidate search),
+  then a safe default. Validation rules identical to the legacy reader.
+  A container can now configure the app entirely via environment variables;
+  the existing shared-drive file path keeps working unchanged.
+- `tests/testthat/test-runtime-config.R` — env-only resolution, file
+  fallback parity with the legacy reader, per-key env override, and
+  validation-rule equivalence.
+- App-startup smoke test now runs twice: legacy config file path and pure
+  env-var path.
+
+### Removed (vestigial, never functional)
+
+- `SQL_SERVER` / `SQL_DATABASE` / `SQL_DRIVER` config keys: written and
+  re-read by config plumbing but never consumed by any code path
+  (`connect_primary_database()` rejects any non-duckdb mode before they
+  could matter). Removed from `R/utils/deployment_config.R` (reader +
+  writer), `R/SETUP/new_setup.R`, `R/CI/run_ci_checks.R`, and four test
+  files. Old config files containing these lines still parse fine — the
+  reader simply ignores them. Real SQL Server support arrives via the
+  Phase 2+ persistence adapters, not these keys.
+
+### Behavior preservation
+
+- `load_app_config()` output shape matches the legacy reader (minus the
+  dead sql_* keys); parity is asserted by test.
+- Source order preserved verbatim in the manifest.
+- Both suites green after the change.

@@ -28,10 +28,7 @@ run_bootstrap_check <- function() {
     credential_secret = paste(rep("ci-bootstrap-secret", 2), collapse = "-"),
     app_log_dir = normalizePath(file.path(temp_root, "logs"), winslash = "/", mustWork = FALSE),
     app_host = "127.0.0.1",
-    app_port = 3838L,
-    sql_server = "",
-    sql_database = "",
-    sql_driver = ""
+    app_port = 3838L
   )
 
   dir.create(dirname(config$db_dir), recursive = TRUE, showWarnings = FALSE)
@@ -60,10 +57,7 @@ run_working_tree_release_check <- function() {
     credential_secret = paste(rep("ci-release-secret", 2), collapse = "-"),
     app_log_dir = normalizePath(file.path(temp_root, "shared", "logs"), winslash = "/", mustWork = FALSE),
     app_host = "127.0.0.1",
-    app_port = 3838L,
-    sql_server = "",
-    sql_database = "",
-    sql_driver = ""
+    app_port = 3838L
   )
 
   dir.create(dirname(config$db_dir), recursive = TRUE, showWarnings = FALSE)

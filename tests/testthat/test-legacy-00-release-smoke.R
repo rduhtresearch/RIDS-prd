@@ -11,10 +11,7 @@ smoke_config <- function(temp_root, secret_stub, nested = FALSE) {
     credential_secret = paste(rep(secret_stub, 2), collapse = "-"),
     app_log_dir = normalizePath(file.path(base, "logs"), winslash = "/", mustWork = FALSE),
     app_host = "127.0.0.1",
-    app_port = 3838L,
-    sql_server = "",
-    sql_database = "",
-    sql_driver = ""
+    app_port = 3838L
   )
   dir.create(dirname(config$db_dir), recursive = TRUE, showWarnings = FALSE)
   dir.create(config$ict_upload_dir, recursive = TRUE, showWarnings = FALSE)

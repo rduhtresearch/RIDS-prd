@@ -52,10 +52,7 @@ run_release_workflow_tests <- function() {
     credential_secret = paste(rep("release-workflow-secret", 2), collapse = "-"),
     app_log_dir = normalizePath(file.path(shared_dir, "logs"), winslash = "/", mustWork = FALSE),
     app_host = "127.0.0.1",
-    app_port = 3838L,
-    sql_server = "",
-    sql_database = "",
-    sql_driver = ""
+    app_port = 3838L
   )
 
   dir.create(dirname(config$db_dir), recursive = TRUE, showWarnings = FALSE)

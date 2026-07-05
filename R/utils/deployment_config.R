@@ -124,9 +124,6 @@ read_runtime_config <- function(path) {
     app_log_dir = as.character(get_value("APP_LOG_DIR", file.path(getwd(), "logs"))),
     app_host = as.character(get_value("APP_HOST", "127.0.0.1")),
     app_port = suppressWarnings(as.integer(get_value("APP_PORT", 3838L))),
-    sql_server = as.character(get_value("SQL_SERVER", "")),
-    sql_database = as.character(get_value("SQL_DATABASE", "")),
-    sql_driver = as.character(get_value("SQL_DRIVER", "")),
     source_path = normalizePath(path, winslash = "/", mustWork = FALSE)
   )
 
@@ -269,10 +266,7 @@ write_deployment_config <- function(path, config) {
     paste0('APP_STATUS     <- "', encode_r_string(config$app_status %||% "live"), '"'),
     paste0('APP_LOG_DIR    <- "', encode_path(config$app_log_dir), '"'),
     paste0('APP_HOST       <- "', encode_r_string(config$app_host), '"'),
-    paste0("APP_PORT       <- ", as.integer(config$app_port)),
-    paste0('SQL_SERVER     <- "', encode_r_string(config$sql_server), '"'),
-    paste0('SQL_DATABASE   <- "', encode_r_string(config$sql_database), '"'),
-    paste0('SQL_DRIVER     <- "', encode_r_string(config$sql_driver), '"')
+    paste0("APP_PORT       <- ", as.integer(config$app_port))
   )
 
   writeLines(lines, path, useBytes = TRUE)
