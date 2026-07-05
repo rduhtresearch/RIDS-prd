@@ -8,6 +8,7 @@
 RIDS_UTIL_FILES <- c(
   "R/utils/deployment_config.R",
   "R/config/runtime_config.R",
+  "R/persistence/migrate.R",
   "R/utils/auth.r",
   "R/utils/logging.R",
   "R/utils/user_credentials.R",

@@ -106,3 +106,61 @@ environment-variable-first configuration. No business logic touched.
   dead sql_* keys); parity is asserted by test.
 - Source order preserved verbatim in the manifest.
 - Both suites green after the change.
+
+## Phase 2a — Versioned schema migrations
+
+Goal: move all DDL out of boot-time R code into versioned, reproducible
+migration files, per dialect. First step of the persistence abstraction.
+
+### Added
+
+- `R/persistence/migrate.R` — small migration runner (no new dependency):
+  ordered `NNNN_*.sql` / `NNNN_*.R` files per dialect, applied versions
+  tracked in a `schema_migrations` table, each migration in a transaction.
+- `R/persistence/migrations/duckdb/`:
+  - `0001_initial_schema.sql` — faithful transcription of every sequence,
+    table, and index previously created inline by `R/setup.r`,
+    `ca_schema.R`, and `ca_ref_activities.R`. All `IF NOT EXISTS`, so an
+    existing production DuckDB file adopts versioning without modification.
+  - `0002_legacy_column_fixups.R` — the ALTER-if-missing column adds that
+    previously ran on every boot, now applied once.
+  - `0003_user_api_credentials_drop_fk.R` — the FK-removal rebuild that
+    previously ran ad hoc inside `user_tables()`, now versioned.
+  - `0004_scrub_meta_data_nul_bytes.R` — the NUL-byte data scrub,
+    previously best-effort on every boot, now once (new writes are
+    sanitized at the application layer).
+- `tests/testthat/test-migrations.R` — runner behavior: full fresh-DB
+  schema, no-op second run, transactional rollback of a failing migration,
+  filename ordering across .sql and .R steps.
+
+### Changed
+
+- `R/setup.r` (876 → 412 lines): now holds only the startup guards
+  (`check_legacy_auth_schema` — the `tokens`-table and unexpected-users-column
+  checks that intentionally block boot, unchanged), the idempotent seed data
+  (finance rules, settings defaults, specialities), and `db_main()`. All
+  per-table entry points (`ict_table`, `user_tables`, `settings_table`, ...)
+  survive for existing callers and delegate DDL to the migration runner.
+- `ca_init_table()` / `ca_init_ref_activities()` delegate DDL to migrations;
+  ref-activity seeding logic unchanged (the redundant identical if/else
+  seed branches collapsed to one loop — same effect).
+
+### Removed
+
+- **The `dbo.app_logs` T-SQL fossil branch** in `app_logs_table()`: dead
+  code for a `storage_mode == "sqlserver"` path that `connect_primary_database()`
+  made unreachable, written in T-SQL that DuckDB could never execute. Real
+  SQL Server support arrives as a dialect adapter + its own migration
+  directory, per the target architecture.
+
+### Behavior notes
+
+- Legacy fixups (column adds, FK rebuild, NUL scrub) now run once per
+  database instead of on every boot — same end state, tracked in
+  `schema_migrations`.
+- On a database with the legacy `tokens` table, startup now stops before
+  applying ANY schema work (previously ict/meta DDL ran first) — strictly
+  safer in an already-fatal path.
+- Verified: full testthat suite green (124 pass / 0 fail) including the
+  legacy-DB upgrade scenarios in `test_setup_migrations.R`, legacy CI green,
+  app-startup smoke tests green both config paths.
