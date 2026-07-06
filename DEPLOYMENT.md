@@ -4,6 +4,11 @@ RIDS runs as a single container configured by environment variables. There
 are no shared drives, launcher scripts, or manual release folders — build
 the image, point it at a database, run it.
 
+This is the quick reference; for the detailed step-by-step walkthroughs
+(Supabase setup, self-hosted PostgreSQL with TLS, data migration from the
+old Windows deployment, backups, troubleshooting) see
+[`docs/setup-guide.md`](docs/setup-guide.md).
+
 ## Configuration
 
 Every setting is a `RIDS_*` environment variable; `.env.example` documents

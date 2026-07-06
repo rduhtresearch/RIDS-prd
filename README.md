@@ -14,9 +14,11 @@ finance rule administration.
   (any authenticator app), one-time recovery codes, MFA-gated self-service
   password reset, and admin-managed accounts (roles: `user` / `admin`).
 
-See [`docs/architecture.md`](docs/architecture.md) for the code layout and
-rules, and [`DEPLOYMENT.md`](DEPLOYMENT.md) for running and hosting it.
-[`REFACTOR_LOG.md`](REFACTOR_LOG.md) records how the codebase got here.
+See [`docs/setup-guide.md`](docs/setup-guide.md) for the detailed
+step-by-step setup and deployment guide, [`DEPLOYMENT.md`](DEPLOYMENT.md)
+for the quick reference, [`docs/architecture.md`](docs/architecture.md)
+for the code layout and rules, and [`REFACTOR_LOG.md`](REFACTOR_LOG.md)
+for how the codebase got here.
 
 ## Quick start (Docker)
 
