@@ -211,3 +211,73 @@ Both suites green after each of the two cutover commits (testthat 124
 pass / 0 fail; legacy CI all checks passed), including the step-2/step-4
 atomic-save, contract-cost source-of-truth, study-deletion, and custom-
 activities suites that exercise the moved SQL directly.
+
+## Phase 3 — Auth provider boundary + TOTP MFA (the approved behavior changes)
+
+This is the one phase with intentional, user-approved behavior changes:
+(1) the insecure username-only password reset is replaced by an MFA-gated
+reset, and (2) the vestigial `developer` role is removed. Everything else
+in the auth system is preserved exactly (session cookie contract, audit
+logging, admin reset semantics, password hashing).
+
+### Added
+
+- `R/auth/totp.R` — pure-R RFC 6238 TOTP (HMAC-SHA1, 6 digits, 30s steps,
+  ±1-step window), base32 codec, otpauth:// provisioning URIs. Verified
+  against the RFC test vectors.
+- `R/auth/mfa.R` — enrollment (secret stored encrypted with the app
+  credential key, same scheme as user_api_credentials), challenge
+  verification with replay protection (last-used-step tracking), 8 one-time
+  recovery codes (stored hashed, shown once), admin MFA reset, and
+  `reset_user_password_with_mfa()` — the replacement reset flow. The reset
+  keeps the old flow's downstream semantics (revoke all sessions, clear
+  force-change flag, audit event) but requires a valid TOTP/recovery code
+  and returns identical generic failures for unknown/inactive/wrong-code
+  (no account enumeration).
+- `R/auth/auth_provider.R` — `build_auth_provider()`: the complete auth
+  interface the UI layer touches (authenticate/sessions/MFA/reset/...).
+  Today's implementation is the local provider; an external provider
+  (e.g. Supabase Auth) is a second build function, no UI changes.
+- Migrations `0005_mfa_tables.sql` (mfa_factors, mfa_recovery_codes) and
+  `0006_collapse_developer_role.sql` (data migration: developer → admin).
+- Login flow: after password verification, enrolled users get an MFA
+  challenge view; unenrolled users (including the first bootstrap admin)
+  must enroll before a session is issued. MFA gates session issuance only —
+  the `rids_auth_token` cookie contract with `www/app-shell.js` is
+  unchanged, so page-refresh session restore behaves exactly as before.
+- Admin panel: "Reset MFA" clears a user's enrollment (audited) so they
+  re-enroll at next sign-in.
+
+### Removed (approved)
+
+- `reset_user_password_by_username()` and the `password_reset_view`'s
+  username-only flow — the `self_service_password_reset_insecure` audit
+  event type no longer exists in the codebase. The reset view now requires
+  username + authentication code + new password.
+- `developer` role: `normalize_role()` now yields user/admin only;
+  `is_manager()`/`can_edit()` deleted (grep-verified no remaining callers —
+  they never gated anything in the UI); the admin role dropdown offers
+  user/admin; migration 0006 maps stored developer rows to admin.
+
+### Test changes (deliberate, same commit as the behavior changes)
+
+- `tests/testthat/test-totp.R` — RFC 6238 vectors, base32 round-trip,
+  window/garbage handling.
+- `tests/testthat/test-mfa.R` — enrollment, replay rejection, single-use
+  recovery codes, admin reset, the new reset flow's semantics, and
+  no-enumeration guarantees.
+- `R/tests/test_auth_password_reset.R` rewritten for the new flow (same
+  scenario coverage: reset works, old password dead, sessions revoked,
+  audit recorded, inactive/unknown fail — plus enumeration equality and
+  the removal of the old function/event).
+- Characterization tests updated to pin the new two-role model and assert
+  the insecure reset is gone.
+- Fixed the migration runner's SQL splitter to strip comment lines before
+  splitting on `;` (a semicolon inside a comment previously corrupted the
+  statement stream).
+
+### Verification
+
+testthat 169 pass / 0 fail; legacy CI all checks passed. The MFA and reset
+flows are exercised end-to-end at the function level (enroll → challenge →
+session; reset with valid/invalid/replayed codes; recovery-code fallback).

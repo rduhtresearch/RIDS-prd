@@ -10,7 +10,7 @@ adminUI <- function(id) {
         textInput(ns("user_name"), "Name"),
         textInput(ns("user_username"), "Username"),
         textInput(ns("user_email"), "Email (optional)"),
-        selectInput(ns("user_role"), "Role", choices = c("user", "developer", "admin")),
+        selectInput(ns("user_role"), "Role", choices = c("user", "admin")),
         checkboxInput(ns("user_active"), "Active", value = TRUE),
         passwordInput(ns("temporary_password"), "Temporary password"),
         div(
@@ -22,6 +22,14 @@ adminUI <- function(id) {
         hr(),
         passwordInput(ns("reset_password_value"), "Reset password to"),
         actionButton(ns("reset_password"), "Reset Password", class = "btn-outline-primary"),
+        hr(),
+        actionButton(ns("reset_mfa"), "Reset MFA", class = "btn-outline-warning"),
+        p(
+          style = "font-size: 0.75rem; color: #697786; margin-top: 0.4rem;",
+          "Clears the selected user's authenticator enrollment and recovery",
+          " codes. They will set up two-factor authentication again at their",
+          " next sign-in."
+        ),
         hr(),
         verbatimTextOutput(ns("password_notice"))
       ),
@@ -466,6 +474,26 @@ adminServer <- function(id, auth_state) {
       )
       updateTextInput(session, "reset_password_value", value = "")
       showNotification("Temporary password reset.", type = "message")
+    })
+
+    observeEvent(input$reset_mfa, {
+      req(isTRUE(is_admin(auth_state$role)))
+      req(!is.null(selected_user_id()))
+
+      result <- admin_reset_user_mfa(
+        user_id = selected_user_id(),
+        actor_user_id = auth_state$user_id
+      )
+
+      if (!isTRUE(result$success)) {
+        showNotification(result$message %||% "MFA reset failed.", type = "error")
+        return()
+      }
+
+      showNotification(
+        "MFA cleared. The user will re-enroll at their next sign-in.",
+        type = "message"
+      )
     })
 
     observe({

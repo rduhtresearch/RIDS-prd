@@ -19,7 +19,8 @@ build_repositories <- function(con) {
     ict_costing = ict_costing_repository(con),
     posting_lines = posting_line_repository(con),
     rules = rules_repository(con),
-    specialities = speciality_repository(con)
+    specialities = speciality_repository(con),
+    mfa = mfa_repository(con)
   )
 }
 

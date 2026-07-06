@@ -1,13 +1,17 @@
-# Characterization tests for the current auth behavior in R/utils/auth.r.
+# Characterization tests for auth behavior (R/utils/auth.r + R/auth/*).
 #
-# These pin the pre-refactor behavior of session restore, role handling, and
-# password flows so later phases can prove that only intentionally-approved
-# changes alter behavior. Where a behavior is slated for an approved change
-# (developer role removal, insecure reset replacement), the test documents
-# the CURRENT behavior and will be updated in the same commit as that change.
+# Phase 0 pinned the pre-refactor behavior. Phase 3 deliberately changed two
+# things, both user-approved, and these tests were updated in the same
+# commit as those changes:
+#   1. The 'developer' role no longer exists (user/admin only; migration
+#      0006 maps legacy developer rows to admin).
+#   2. The insecure username-only password reset was replaced by an
+#      MFA-gated reset (see test-mfa.R for the new flow's tests).
+# Everything else pins unchanged behavior.
 
 auth_test_db <- function(env = parent.frame()) {
   source_from_root("R/utils/auth.r")
+  source_from_root("R/auth/mfa.R")
 
   db_path <- tempfile(fileext = ".duckdb")
   con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path)
@@ -16,6 +20,7 @@ auth_test_db <- function(env = parent.frame()) {
   assign("CON", con, envir = .GlobalEnv)
   assign("app_log_exception", function(...) NULL, envir = .GlobalEnv)
   assign("log_event", function(...) NULL, envir = .GlobalEnv)
+  assign("CREDENTIAL_SECRET", "characterization-test-secret", envir = .GlobalEnv)
 
   withr::defer({
     if (is.null(old_con)) {
@@ -27,36 +32,10 @@ auth_test_db <- function(env = parent.frame()) {
     unlink(db_path, force = TRUE)
   }, envir = env)
 
-  DBI::dbExecute(con, "CREATE SEQUENCE user_id_seq;")
-  DBI::dbExecute(con, "CREATE SEQUENCE auth_session_id_seq;")
-  DBI::dbExecute(con, "CREATE SEQUENCE auth_audit_id_seq;")
-  DBI::dbExecute(con, "
-    CREATE TABLE users (
-      user_id INTEGER PRIMARY KEY DEFAULT nextval('user_id_seq'),
-      name TEXT, username TEXT UNIQUE NOT NULL, email TEXT, password_hash TEXT,
-      role TEXT NOT NULL DEFAULT 'user',
-      active BOOLEAN NOT NULL DEFAULT TRUE,
-      force_password_change BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      last_login_at TIMESTAMP
-    )")
-  DBI::dbExecute(con, "
-    CREATE TABLE auth_sessions (
-      session_id INTEGER PRIMARY KEY DEFAULT nextval('auth_session_id_seq'),
-      user_id INTEGER NOT NULL, token_hash TEXT NOT NULL,
-      expires_at TIMESTAMP NOT NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      revoked_at TIMESTAMP, user_agent TEXT
-    )")
-  DBI::dbExecute(con, "
-    CREATE TABLE auth_audit_log (
-      audit_id INTEGER PRIMARY KEY DEFAULT nextval('auth_audit_id_seq'),
-      timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      event_type TEXT NOT NULL, user_id INTEGER, actor_user_id INTEGER,
-      username TEXT, success BOOLEAN NOT NULL DEFAULT TRUE,
-      message TEXT, session_id INTEGER
-    )")
+  old_wd <- setwd(rids_repo_root())
+  withr::defer(setwd(old_wd), envir = env)
+  run_migrations(con)
+
   con
 }
 
@@ -68,7 +47,7 @@ audit_count <- function(con, event_type) {
   )$n[[1]]
 }
 
-test_that("role helpers: current three-role model (developer slated for removal)", {
+test_that("role helpers: two-role model (user/admin)", {
   source_from_root("R/utils/auth.r")
 
   expect_identical(normalize_role("admin"), "admin")
@@ -77,21 +56,38 @@ test_that("role helpers: current three-role model (developer slated for removal)
   expect_identical(normalize_role(NULL), "user")
   expect_identical(normalize_role(NA_character_), "user")
   expect_identical(normalize_role("something_else"), "user")
-  # Current behavior: dev/developer normalize to "developer"
-  expect_identical(normalize_role("dev"), "developer")
-  expect_identical(normalize_role("developer"), "developer")
+  # Approved change: developer role removed — unknown roles (including the
+  # old dev/developer strings) normalize to user; data migration 0006 maps
+  # stored developer rows to admin before the app ever reads them.
+  expect_identical(normalize_role("dev"), "user")
+  expect_identical(normalize_role("developer"), "user")
 
   expect_true(is_admin("admin"))
   expect_false(is_admin("user"))
-  expect_false(is_admin("developer"))
 
-  # Current behavior: is_manager admits admin+developer, can_edit only developer
-  expect_true(is_manager("admin"))
-  expect_true(is_manager("developer"))
-  expect_false(is_manager("user"))
-  expect_true(can_edit("developer"))
-  expect_false(can_edit("admin"))
-  expect_false(can_edit("user"))
+  # Approved change: developer-only helpers removed with the role.
+  expect_false(exists("is_manager", mode = "function"))
+  expect_false(exists("can_edit", mode = "function"))
+})
+
+test_that("migration 0006 maps stored developer roles to admin", {
+  con <- auth_test_db()
+
+  DBI::dbExecute(
+    con,
+    "INSERT INTO users (name, username, password_hash, role) VALUES (?, ?, ?, ?)",
+    params = list("Late Dev", "late.dev", "hash", "user")
+  )
+  # Simulate a legacy row that slipped in with the old role string, then
+  # re-run the migration logic directly (the migration already ran in setup).
+  DBI::dbExecute(con, "UPDATE users SET role = 'developer' WHERE username = 'late.dev'")
+  DBI::dbExecute(con, "UPDATE users SET role = 'admin' WHERE lower(trim(role)) IN ('dev', 'developer')")
+
+  role <- DBI::dbGetQuery(
+    con,
+    "SELECT role FROM users WHERE username = 'late.dev'"
+  )$role[[1]]
+  expect_identical(role, "admin")
 })
 
 test_that("session restore: every failure branch returns its distinct status", {
@@ -206,17 +202,7 @@ test_that("change_user_password requires the current password and clears force f
   expect_equal(audit_count(con, "password_changed"), 1)
 })
 
-test_that("insecure username-only reset: current behavior (slated for replacement)", {
-  con <- auth_test_db()
-
-  create_user_account(
-    name = "Insecure Reset", username = "insecure.reset",
-    temporary_password = "BeforeReset1", active = TRUE
-  )
-
-  res <- reset_user_password_by_username("insecure.reset", "AfterReset1")
-  expect_true(res$success)
-  expect_true(authenticate_user("insecure.reset", "AfterReset1")$success)
-  # Self-flagged insecure audit event — must disappear when the flow is replaced
-  expect_equal(audit_count(con, "self_service_password_reset_insecure"), 1)
+test_that("the insecure username-only reset no longer exists", {
+  source_from_root("R/utils/auth.r")
+  expect_false(exists("reset_user_password_by_username", mode = "function"))
 })

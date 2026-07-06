@@ -14,6 +14,7 @@ source("R/persistence/repositories/ict_costing_repository.R", local = FALSE)
 source("R/persistence/repositories/posting_line_repository.R", local = FALSE)
 source("R/persistence/repositories/rules_repository.R", local = FALSE)
 source("R/persistence/repositories/speciality_repository.R", local = FALSE)
+source("R/persistence/repositories/mfa_repository.R", local = FALSE)
 
 hash_password <- function(pw) {
   tryCatch({
@@ -33,12 +34,10 @@ verify_password <- function(pw, pw_hash) {
   })
 }
 
+# Role model: user / admin only. (The vestigial 'developer' role was removed;
+# migration 0006 maps any existing developer rows to admin.)
 normalize_role <- function(role) {
   role <- tolower(trimws(role %||% "user"))
-
-  if (role %in% c("dev", "developer")) {
-    return("developer")
-  }
 
   if (role == "admin") {
     return("admin")
@@ -49,14 +48,6 @@ normalize_role <- function(role) {
 
 is_admin <- function(role) {
   identical(normalize_role(role), "admin")
-}
-
-is_manager <- function(role) {
-  normalize_role(role) %in% c("admin", "developer")
-}
-
-can_edit <- function(role) {
-  identical(normalize_role(role), "developer")
 }
 
 `%||%` <- function(x, y) {
@@ -509,38 +500,6 @@ reset_user_password <- function(user_id, temporary_password, actor_user_id = NUL
   )
 
   list(success = TRUE, temporary_password = temporary_password, user = get_user_by_id(user_id))
-}
-
-reset_user_password_by_username <- function(username, new_password) {
-  user_row <- get_user_by_username(username)
-  if (is.null(user_row)) {
-    return(list(success = FALSE, message = "User not found."))
-  }
-
-  row <- user_row[1, , drop = FALSE]
-
-  if (!isTRUE(row$active[[1]])) {
-    return(list(success = FALSE, message = "User is inactive."))
-  }
-
-  password_hash <- hash_password(new_password)
-  if (is.null(password_hash)) {
-    return(list(success = FALSE, message = "Failed to reset password."))
-  }
-
-  rids_repos()$users$set_password_hash(row$user_id[[1]], password_hash, force_password_change = FALSE)
-  rids_repos()$sessions$revoke_all_for_user(row$user_id[[1]])
-
-  log_auth_event(
-    event_type = "self_service_password_reset_insecure",
-    user_id = row$user_id[[1]],
-    actor_user_id = row$user_id[[1]],
-    username = row$username[[1]],
-    success = TRUE,
-    message = "Username-only password reset completed"
-  )
-
-  list(success = TRUE, user = get_user_by_id(row$user_id[[1]]))
 }
 
 change_user_password <- function(user_id,

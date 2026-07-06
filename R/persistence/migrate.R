@@ -19,16 +19,13 @@ rids_migrations_dir <- function(dialect = "duckdb") {
 }
 
 rids_split_sql_statements <- function(sql_text) {
-  chunks <- strsplit(paste(sql_text, collapse = "\n"), ";", fixed = TRUE)[[1]]
-  statements <- character()
-  for (chunk in chunks) {
-    lines <- strsplit(chunk, "\n", fixed = TRUE)[[1]]
-    meaningful <- lines[!grepl("^\\s*(--.*)?$", lines)]
-    if (length(meaningful) > 0) {
-      statements <- c(statements, chunk)
-    }
-  }
-  statements
+  lines <- unlist(strsplit(sql_text, "\n", fixed = TRUE))
+  # Drop comment-only lines first so `;` inside comments can't split a
+  # statement incorrectly. (Inline trailing comments are not supported.)
+  lines <- lines[!grepl("^\\s*--", lines)]
+
+  chunks <- strsplit(paste(lines, collapse = "\n"), ";", fixed = TRUE)[[1]]
+  chunks[grepl("[^[:space:]]", chunks)]
 }
 
 rids_applied_migrations <- function(con) {
