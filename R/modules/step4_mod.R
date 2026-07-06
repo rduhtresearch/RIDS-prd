@@ -1148,16 +1148,13 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       req(adjusted)
       
       persisted_ok <- tryCatch({
-        DBI::dbWithTransaction(CON, {
-          dbExecute(CON,
-                    paste(
-                      "DELETE FROM posting_lines",
-                      "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?"
-                    ),
-                    params = study_identity_params()
-          )
-          dbAppendTable(CON, "posting_lines", adjusted)
-        })
+        identity_params <- study_identity_params()
+        rids_repos()$posting_lines$replace_for_run(
+          adjusted,
+          identity_params[[1]],
+          identity_params[[2]],
+          identity_params[[3]]
+        )
         log_step4_event(
           level = "INFO",
           message = "Posting lines saved",
@@ -1200,17 +1197,11 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       
       tmpl <- tryCatch({
         
-        visit_lookup <- dbGetQuery(CON, "
-                        SELECT DISTINCT Study, Study_Arm, Visit_Label, Visit_Number
-                        FROM ict_costing_tbl
-                        WHERE CPMS_ID = ? AND study_site = ? AND scenario_id = ?
-                          AND Visit_Label IS NOT NULL
-                      ",
-                      params = list(
-                        as.character(shared_state$cpms_id),
-                        as.character(shared_state$study_site),
-                        as.character(shared_state$scenario_id)
-                      ))
+        visit_lookup <- rids_repos()$ict_costing$visit_lookup(
+          as.character(shared_state$cpms_id),
+          as.character(shared_state$study_site),
+          as.character(shared_state$scenario_id)
+        )
         
         templates <- build_all_edge_templates(adjusted, visit_lookup, shared_state$upload_meta$edge_id)
         
@@ -1270,12 +1261,12 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
         zip_path(zp)
         
         # Persist the ZIP path to meta_data for this study
-        dbExecute(CON,
-                  paste(
-                    "UPDATE meta_data SET edge_zip_path = ?",
-                    "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?"
-                  ),
-                  params = c(list(zp), study_identity_params())
+        zip_identity <- study_identity_params()
+        rids_repos()$studies$set_edge_zip_path(
+          zp,
+          zip_identity[[1]],
+          zip_identity[[2]],
+          zip_identity[[3]]
         )
 
         log_step4_event(

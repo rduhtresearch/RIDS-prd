@@ -48,20 +48,16 @@ COST_CENTRE_MATRIX_COLUMN_ALIASES <- c(
 
 cc_get_setting <- function(key, default = "") {
   value <- tryCatch({
-    DBI::dbGetQuery(
-      CON,
-      "SELECT value FROM app_settings WHERE key = ? LIMIT 1",
-      params = list(key)
-    )
+    rids_repos()$settings$find_value(key)
   }, error = function(e) {
-    data.frame(value = character(), stringsAsFactors = FALSE)
+    character(0)
   })
 
-  if (nrow(value) == 0 || is.na(value$value[[1]]) || !nzchar(trimws(value$value[[1]]))) {
+  if (length(value) == 0 || is.na(value[[1]]) || !nzchar(trimws(value[[1]]))) {
     return(default)
   }
 
-  as.character(value$value[[1]])
+  as.character(value[[1]])
 }
 
 
@@ -84,10 +80,7 @@ cc_resolve_speciality_cost_centre <- function(study_speciality) {
 }
 
 cc_allowed_posting_line_types <- function() {
-  DBI::dbGetQuery(
-    CON,
-    "SELECT posting_line_type_id FROM posting_line_types ORDER BY posting_line_type_id"
-  )$posting_line_type_id
+  rids_repos()$rules$posting_line_type_ids()
 }
 
 cc_apply_column_aliases <- function(df) {

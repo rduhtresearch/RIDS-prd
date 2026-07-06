@@ -164,3 +164,50 @@ migration files, per dialect. First step of the persistence abstraction.
 - Verified: full testthat suite green (124 pass / 0 fail) including the
   legacy-DB upgrade scenarios in `test_setup_migrations.R`, legacy CI green,
   app-startup smoke tests green both config paths.
+
+## Phase 2b — Repository layer (persistence boundary)
+
+Goal: every SQL statement the app issues lives in one repository file per
+aggregate under `R/persistence/repositories/`; no `dbGetQuery`/`dbExecute`
+outside the persistence layer. Wrapping is verbatim — same SQL, same
+transactions, same error-handling shape at call sites.
+
+### Repositories added
+
+`settings`, `app_logs`, `api_credentials`, `users`, `sessions`,
+`auth_audit`, `studies` (meta_data + the transactional cross-table cascade
+delete of a study run), `ict_costing` (incl. the staging-table atomic
+replace used by workbook ingest and the step-2 atomic save), `posting_lines`
+(incl. step 4's atomic replace), `rules` (ruleset bundle reads +
+posting-line-type list), `specialities`.
+
+`R/persistence/connection.R` provides `build_repositories(con)`,
+`with_read_connection(db_path, fn)` (absorbs the posting engine's
+DuckDB-specific short-lived read-only connections), and `rids_repos()` — the
+transitional accessor binding repositories to the global `CON` until
+services receive them by injection (retired with the global CON in Phase 4).
+
+`R/addons/custom_activities/ca_queries.R` already met the repository
+contract (injectable `con`, focused portable SQL) and is designated the
+custom-activities repository in place, preserving the addon's
+self-containment.
+
+### Call sites cut over
+
+`auth.r`, `logging.R`, `user_credentials.R`, `global.R`, `admin_mod.r`,
+`add_cost_centres.r`, `study_deletion.R`, `pipeline_fixed.r`,
+`posting_engine.r`, `posting_lines.r`, `step1-4_mod.R`, `library_mod.R`,
+`study_workspace_mod.R`. Remaining direct SQL: DuckDB WAL `CHECKPOINT` in
+`deployment_config.R` (backup infra, deleted in Phase 4) and test fixtures.
+
+### Also removed
+
+- The unreachable SQL-Server `TOP(n)` branch in `query_app_logs` and its
+  `current_storage_mode()` helper.
+
+### Verification
+
+Both suites green after each of the two cutover commits (testthat 124
+pass / 0 fail; legacy CI all checks passed), including the step-2/step-4
+atomic-save, contract-cost source-of-truth, study-deletion, and custom-
+activities suites that exercise the moved SQL directly.

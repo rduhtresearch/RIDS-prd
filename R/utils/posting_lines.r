@@ -45,6 +45,10 @@ suppressPackageStartupMessages({
   library(openxlsx)
 })
 
+source("R/persistence/connection.R", local = FALSE)
+source("R/persistence/repositories/rules_repository.R", local = FALSE)
+source("R/persistence/repositories/ict_costing_repository.R", local = FALSE)
+
 # ======================================================================
 # Helpers
 # ======================================================================
@@ -204,33 +208,9 @@ normalise_rows <- function(df, scenario_id, ruleset_id) {
 load_rules <- function(db_path, ruleset_id) {
   if (!file.exists(db_path)) stop("load_rules(): DB not found: ", db_path)
   
-  con <- dbConnect(duckdb::duckdb(), dbdir = db_path, read_only = TRUE)
-  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  
-  dist_rules <- dbGetQuery(con, "
-    SELECT scenario_id, row_category, condition_field, condition_op, condition_value,
-           posting_line_type_id, priority
-    FROM dist_rules
-    WHERE ruleset_id = ?
-  ", params = list(ruleset_id))
-  
-  amount_map <- dbGetQuery(con, "
-    SELECT posting_line_type_id, base_mult, split_mult, applies_to_row_category, calc_method
-    FROM amount_map
-  ")
-  
-  routing_rules <- dbGetQuery(con, "
-    SELECT scenario_id, condition_field, condition_op, condition_value,
-           posting_line_type_id, destination_bucket, priority
-    FROM routing_rules
-    WHERE ruleset_id = ?
-  ", params = list(ruleset_id))
-  
-  list(
-    dist_rules    = dist_rules,
-    amount_map    = amount_map,
-    routing_rules = routing_rules
-  )
+  with_read_connection(db_path, function(con) {
+    rules_repository(con)$ruleset_bundle(ruleset_id)
+  })
 }
 
 #' Join saved contract costs from ict_costing_tbl using the CORRECTED composite key.
@@ -265,20 +245,19 @@ join_ict_costs <- function(df, db_path) {
     return(df)
   }
   
-  con <- dbConnect(duckdb::duckdb(), dbdir = db_path, read_only = TRUE)
-  on.exit(dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  
-  if (!dbExistsTable(con, "ict_costing_tbl")) {
+  ict <- with_read_connection(db_path, function(con) {
+    repo <- ict_costing_repository(con)
+    if (!repo$exists_table()) {
+      return(NULL)
+    }
+    repo$all_contract_costs()
+  })
+
+  if (is.null(ict)) {
     warning("join_ict_costs(): ict_costing_tbl not found in DB -- skipping.")
     df$contract_cost <- NA_real_
     return(df)
   }
-  
-  ict <- dbGetQuery(con, "
-    SELECT CPMS_ID, study_site, scenario_id, Visit_Number, Study_Arm, Activity_Name, Contract_Cost,
-           activity_occurrence_id, staff_group
-    FROM ict_costing_tbl
-  ")
   
   # ── Row-level join: activity rows (Activity_Name NOT NULL) ─────────────────
   # staff_group is the disambiguator: same activity at the same visit with
