@@ -358,6 +358,17 @@ DuckDB and PostgreSQL.
   `%LOCALAPPDATA%`, `P:\` paths, or launcher scripts anywhere in code or
   docs.
 
+## Addendum — browser-driven smoke test
+
+`tests/testthat/test-browser-smoke.R` boots the real app in a subprocess
+and drives headless Chrome (chromote) through the first-run flow: bootstrap
+admin creation, mandatory TOTP enrollment (computing a real code from the
+setup key shown in the UI), the recovery-codes modal (8 codes), and the
+logged-in app shell with the user badge. Skipped automatically when
+chromote/Chrome isn't available; adds `--no-sandbox` only when running as
+root (containers). Full suite with browser + PostgreSQL tests: 220 pass /
+0 fail / 0 warnings.
+
 ## Final state vs. original success criteria
 
 - **Behavior preserved**: every original test assertion still runs and
