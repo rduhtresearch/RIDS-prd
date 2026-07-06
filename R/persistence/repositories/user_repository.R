@@ -7,7 +7,7 @@ user_repository <- function(con) {
   )
 
   find_by_id <- function(user_id) {
-    row <- DBI::dbGetQuery(
+    row <- rids_dbGetQuery(
       con,
       paste("SELECT", user_columns, "FROM users WHERE user_id = ? LIMIT 1"),
       params = list(user_id)
@@ -17,7 +17,7 @@ user_repository <- function(con) {
 
   list(
     find_by_username = function(username) {
-      row <- DBI::dbGetQuery(
+      row <- rids_dbGetQuery(
         con,
         paste("SELECT", user_columns, "FROM users WHERE lower(username) = lower(?) LIMIT 1"),
         params = list(username)
@@ -28,11 +28,11 @@ user_repository <- function(con) {
     find_by_id = find_by_id,
 
     count = function() {
-      DBI::dbGetQuery(con, "SELECT COUNT(*) AS n FROM users")$n[[1]]
+      rids_dbGetQuery(con, "SELECT COUNT(*) AS n FROM users")$n[[1]]
     },
 
     username_taken_by_other = function(username, user_id) {
-      nrow(DBI::dbGetQuery(
+      nrow(rids_dbGetQuery(
         con,
         "SELECT user_id FROM users WHERE lower(username) = lower(?) AND user_id <> ? LIMIT 1",
         params = list(username, user_id)
@@ -41,7 +41,7 @@ user_repository <- function(con) {
 
     insert = function(name, username, email, password_hash, role, active,
                       force_password_change = TRUE) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "INSERT INTO users",
@@ -51,11 +51,11 @@ user_repository <- function(con) {
         params = list(name, username, email, password_hash, role,
                       isTRUE(active), isTRUE(force_password_change))
       )
-      DBI::dbGetQuery(con, "SELECT currval('user_id_seq') AS user_id")$user_id[[1]]
+      rids_dbGetQuery(con, "SELECT currval('user_id_seq') AS user_id")$user_id[[1]]
     },
 
     update_account = function(user_id, name, username, email, role, active) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "UPDATE users SET",
@@ -68,7 +68,7 @@ user_repository <- function(con) {
     },
 
     set_active = function(user_id, active) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE users SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
         params = list(isTRUE(active), user_id)
@@ -77,7 +77,7 @@ user_repository <- function(con) {
     },
 
     set_password_hash = function(user_id, password_hash, force_password_change) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "UPDATE users SET password_hash = ?, force_password_change = ?,",
@@ -89,7 +89,7 @@ user_repository <- function(con) {
     },
 
     touch_last_login = function(user_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE users SET last_login_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
         params = list(user_id)
@@ -98,7 +98,7 @@ user_repository <- function(con) {
     },
 
     list_all = function() {
-      DBI::dbGetQuery(
+      rids_dbGetQuery(
         con,
         paste(
           "SELECT user_id, name, username, email, role, active, force_password_change,",

@@ -67,7 +67,6 @@ run_legacy_suite <- function(runner_name, test_file, deps = character(0)) {
 # R/CI/run_ci_checks.R (which sources these before running any suite).
 source_from_root(
   "R/utils/deployment_config.R",
-  "R/utils/release_management.R",
   "R/addons/custom_activities/ca_build_custom_rows.R",
   "R/addons/custom_activities/ca_schema.R",
   "R/addons/custom_activities/ca_ref_activities.R",

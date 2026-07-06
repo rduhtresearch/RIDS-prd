@@ -281,3 +281,61 @@ logging, admin reset semantics, password hashing).
 testthat 169 pass / 0 fail; legacy CI all checks passed. The MFA and reset
 flows are exercised end-to-end at the function level (enroll → challenge →
 session; reset with valid/invalid/replayed codes; recovery-code fallback).
+
+## Phase 4 — PostgreSQL adapter, Docker, Windows machinery removal
+
+### PostgreSQL support
+
+- `R/persistence/db_helpers.R` — the dialect boundary. Queries are written
+  once in standard SQL; the two real DuckDB/PostgreSQL differences are
+  absorbed here: placeholder style (`?` vs `$1`, translated per connection
+  class) and identifier case folding (PostgreSQL lowercases unquoted
+  identifiers; canonical mixed-case column names like `CPMS_ID`/`Study_Arm`
+  are restored after fetch and lowercased before append — no-ops on DuckDB).
+  The legacy NUL-byte scrub becomes a plain column reference on PostgreSQL
+  (its text type cannot hold NUL at all).
+- `R/persistence/migrations/postgres/0001_initial_schema.sql` — the complete
+  current schema (incl. MFA tables) in PostgreSQL dialect (`DOUBLE` →
+  `DOUBLE PRECISION`; everything else identical). DuckDB's legacy fixups
+  (0002–0004) and role collapse (0006) are DuckDB-history-only; fresh
+  PostgreSQL databases start current. The migration runner picks the
+  dialect directory from the connection class.
+- `connect_primary_database()` supports `storage_mode = postgres` via
+  `RIDS_DATABASE_URL` (Supabase connection strings work directly,
+  `sslmode=require` honored) or standard `PG*` variables; `sqlserver` now
+  fails fast with a pointer to the adapter design doc instead of a blanket
+  rejection.
+- Verified against a real PostgreSQL 18 server: schema structural
+  equivalence with DuckDB (same tables, same column sets), full auth + MFA +
+  reset flows, study/ICT/posting round-trips with canonical column names,
+  seed idempotency, and a full app boot (`test-postgres-integration.R` +
+  the PostgreSQL startup smoke test; gated on `RIDS_TEST_PG_URL`).
+
+### Docker / deployment
+
+- `Dockerfile` (rocker/r-ver 4.4.3, packages from a date-pinned Posit
+  Package Manager snapshot — the image's reproducibility mechanism — 
+  non-root user, port 3838), `docker/run_app.R` entry point (migrations run
+  at boot via `db_main()`), `docker-compose.yml` (app + PostgreSQL 16 with
+  healthcheck; DuckDB mode via env switch), `.env.example`, `.dockerignore`.
+
+### Removed (the Windows/shared-drive deployment model)
+
+| Removed | Rationale |
+|---|---|
+| `R/SETUP/new_setup.R`, `release_publish.R` | First-time shared-drive setup and release publish/rollback CLI — replaced by Docker build/deploy |
+| `R/SETUP/manual_backup.R`, `manual_restore.R` | P:\-drive backup/restore — replaced by provider-native backups (Supabase/pg_dump) for postgres; DuckDB dev data is disposable or a plain file copy |
+| `R/utils/release_management.R` | Release snapshot/export/smoke machinery for the shared-drive model |
+| Launcher/cache half of `deployment_config.R` (~450 lines): `write_launcher_bat`, `write_prepare_bat`, `write_launcher_r_script`, `write_prepare_r_script`, `sync_release_to_local_cache`, `prune_local_release_cache`, `release_cache_*`, `local_release_cache_root`, `ensure_required_app_files`, `copy_directory_contents` | %LOCALAPPDATA% release cache + .bat generation — replaced by containers |
+| `R/tests/test_release_workflow.R`, `test_wal_backup_handling.R` + their wrappers and the release-smoke testthat file | They tested the deleted machinery. WAL consolidation itself (still used by duckdb mode) kept its coverage via the new native `test-duckdb-wal.R` |
+
+`deployment_config.R` shrank to: legacy config-file read/write (still a
+supported fallback behind env vars), connection open/close per storage
+mode, and DuckDB WAL consolidation. `R/CI/run_ci_checks.R` is now a thin
+wrapper over `tests/testthat.R`.
+
+### Verification
+
+Full suite with PostgreSQL integration enabled: 217 pass / 0 fail /
+0 warnings. App boots end-to-end via env-var-only config against both
+DuckDB and PostgreSQL.

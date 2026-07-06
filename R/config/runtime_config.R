@@ -32,6 +32,7 @@ load_app_config <- function(app_dir = getwd()) {
 
   cfg <- list(
     storage_mode = tolower(rids_env("RIDS_STORAGE_MODE", from_file("storage_mode", "duckdb"))),
+    database_url = rids_env("RIDS_DATABASE_URL", from_file("database_url")),
     db_dir = rids_env("RIDS_DB_DIR", from_file("db_dir")),
     ict_upload_dir = rids_env("RIDS_ICT_UPLOAD_DIR", from_file("ict_upload_dir")),
     edge_output_dir = rids_env("RIDS_EDGE_OUTPUT_DIR", from_file("edge_output_dir")),
@@ -53,8 +54,18 @@ load_app_config <- function(app_dir = getwd()) {
     paste(candidates, collapse = ", ")
   )
 
-  if (!nzchar(cfg$db_dir)) {
+  if (identical(cfg$storage_mode, "duckdb") && !nzchar(cfg$db_dir)) {
     stop("Missing database location (RIDS_DB_DIR / DB_DIR). ", missing_key_hint)
+  }
+
+  if (identical(cfg$storage_mode, "postgres") &&
+      !nzchar(cfg$database_url) &&
+      !nzchar(Sys.getenv("PGHOST", ""))) {
+    stop(
+      "Storage mode 'postgres' needs RIDS_DATABASE_URL ",
+      "(postgres://user:pass@host:port/dbname) or the standard PG* ",
+      "environment variables (PGHOST, PGDATABASE, PGUSER, PGPASSWORD)."
+    )
   }
   if (!nzchar(cfg$ict_upload_dir)) {
     stop("Missing upload directory (RIDS_ICT_UPLOAD_DIR / ICT_UPLOAD_DIR). ", missing_key_hint)

@@ -53,7 +53,7 @@ ca_next_id <- function(cpms_id, study_site, scenario_id, con = CON) {
     stop("ca_next_id(): `scenario_id` must be a non-empty single string.")
   }
   
-  existing <- dbGetQuery(con, "
+  existing <- rids_dbGetQuery(con, "
     SELECT DISTINCT custom_activity_id
     FROM addon_custom_activities
     WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?
@@ -138,7 +138,7 @@ ca_insert <- function(activity, con = CON) {
   
   # Transaction: either all slots land, or none do.
   dbWithTransaction(con, {
-    dbAppendTable(con, "addon_custom_activities", insert_df)
+    dbAppendTable(con, "addon_custom_activities", rids_prepare_append(con, insert_df))
   })
   
   custom_activity_id
@@ -172,7 +172,7 @@ ca_load <- function(cpms_id, study_site, scenario_id, con = CON) {
     stop("ca_load(): `scenario_id` must be a non-empty single string.")
   }
   
-  df <- dbGetQuery(con, "
+  df <- rids_dbGetQuery(con, "
     SELECT id, custom_activity_id, cpms_id, study_site, study_name, scenario_id,
            Study_Arm, Activity, mode, slot_num, cost_centre, amount,
            created_by, created_at
@@ -185,7 +185,7 @@ ca_load <- function(cpms_id, study_site, scenario_id, con = CON) {
     as.character(scenario_id)
   ))
   
-  as_tibble(df)
+  as_tibble(rids_canonicalize_names(df, "addon_custom_activities"))
 }
 
 # ── Delete one ───────────────────────────────────────────────────────────────
@@ -205,7 +205,7 @@ ca_delete <- function(custom_activity_id, con = CON) {
     stop("ca_delete(): `custom_activity_id` must be a non-empty single string.")
   }
   
-  dbExecute(con, "
+  rids_dbExecute(con, "
     DELETE FROM addon_custom_activities
     WHERE custom_activity_id = ?
   ", params = list(as.character(custom_activity_id)))
@@ -238,7 +238,7 @@ ca_clear_run <- function(cpms_id, study_site, scenario_id, con = CON) {
     stop("ca_clear_run(): `scenario_id` must be a non-empty single string.")
   }
   
-  dbExecute(con, "
+  rids_dbExecute(con, "
     DELETE FROM addon_custom_activities
     WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?
   ", params = list(

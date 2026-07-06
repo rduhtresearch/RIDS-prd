@@ -45,10 +45,10 @@ suppressPackageStartupMessages({
 #' @param con  DuckDB connection (defaults to global CON).
 #' @return     Invisibly TRUE.
 ca_init_ref_activities <- function(con = CON) {
-  run_migrations(con, dialect = "duckdb")
+  run_migrations(con)
 
   for (nm in .CA_REF_ACTIVITIES_SEED) {
-    dbExecute(con,
+    rids_dbExecute(con,
               "INSERT INTO ref_custom_activities (name) VALUES (?)
                ON CONFLICT (name) DO NOTHING",
               params = list(nm))

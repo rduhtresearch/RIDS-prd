@@ -4,7 +4,7 @@
 mfa_repository <- function(con) {
   list(
     find_factor = function(user_id, method = "totp") {
-      rows <- DBI::dbGetQuery(
+      rows <- rids_dbGetQuery(
         con,
         paste(
           "SELECT factor_id, user_id, method, secret_ciphertext, secret_nonce,",
@@ -17,12 +17,12 @@ mfa_repository <- function(con) {
     },
 
     upsert_factor = function(user_id, secret_ciphertext, secret_nonce, method = "totp") {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "DELETE FROM mfa_factors WHERE user_id = ? AND method = ?",
         params = list(as.integer(user_id), method)
       )
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "INSERT INTO mfa_factors (user_id, method, secret_ciphertext, secret_nonce)",
@@ -34,7 +34,7 @@ mfa_repository <- function(con) {
     },
 
     mark_factor_verified = function(factor_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE mfa_factors SET verified_at = CURRENT_TIMESTAMP WHERE factor_id = ?",
         params = list(factor_id)
@@ -43,7 +43,7 @@ mfa_repository <- function(con) {
     },
 
     set_last_used_step = function(factor_id, step) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE mfa_factors SET last_used_step = ? WHERE factor_id = ?",
         params = list(as.numeric(step), factor_id)
@@ -52,7 +52,7 @@ mfa_repository <- function(con) {
     },
 
     delete_factors_for_user = function(user_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "DELETE FROM mfa_factors WHERE user_id = ?",
         params = list(as.integer(user_id))
@@ -61,13 +61,13 @@ mfa_repository <- function(con) {
     },
 
     replace_recovery_codes = function(user_id, code_hashes) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "DELETE FROM mfa_recovery_codes WHERE user_id = ?",
         params = list(as.integer(user_id))
       )
       for (code_hash in code_hashes) {
-        DBI::dbExecute(
+        rids_dbExecute(
           con,
           "INSERT INTO mfa_recovery_codes (user_id, code_hash) VALUES (?, ?)",
           params = list(as.integer(user_id), code_hash)
@@ -77,7 +77,7 @@ mfa_repository <- function(con) {
     },
 
     find_unused_recovery_code = function(user_id, code_hash) {
-      rows <- DBI::dbGetQuery(
+      rows <- rids_dbGetQuery(
         con,
         paste(
           "SELECT code_id FROM mfa_recovery_codes",
@@ -89,7 +89,7 @@ mfa_repository <- function(con) {
     },
 
     mark_recovery_code_used = function(code_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE mfa_recovery_codes SET used_at = CURRENT_TIMESTAMP WHERE code_id = ?",
         params = list(code_id)
@@ -98,7 +98,7 @@ mfa_repository <- function(con) {
     },
 
     delete_recovery_codes_for_user = function(user_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "DELETE FROM mfa_recovery_codes WHERE user_id = ?",
         params = list(as.integer(user_id))

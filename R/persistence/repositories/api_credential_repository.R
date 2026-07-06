@@ -4,7 +4,7 @@
 api_credential_repository <- function(con) {
   list(
     find = function(user_id, provider) {
-      rows <- DBI::dbGetQuery(
+      rows <- rids_dbGetQuery(
         con,
         paste(
           "SELECT credential_id, user_id, provider, secret_ciphertext, secret_nonce,",
@@ -19,7 +19,7 @@ api_credential_repository <- function(con) {
     },
 
     insert = function(user_id, provider, secret_ciphertext, secret_nonce) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "INSERT INTO user_api_credentials",
@@ -32,7 +32,7 @@ api_credential_repository <- function(con) {
     },
 
     update_secret = function(credential_id, secret_ciphertext, secret_nonce) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "UPDATE user_api_credentials",
@@ -45,7 +45,7 @@ api_credential_repository <- function(con) {
     },
 
     delete = function(user_id, provider) {
-      as.integer(DBI::dbExecute(
+      as.integer(rids_dbExecute(
         con,
         "DELETE FROM user_api_credentials WHERE user_id = ? AND provider = ?",
         params = list(as.integer(user_id), provider)

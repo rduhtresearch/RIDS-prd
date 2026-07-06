@@ -3,7 +3,7 @@
 settings_repository <- function(con) {
   list(
     find_value = function(key) {
-      row <- DBI::dbGetQuery(
+      row <- rids_dbGetQuery(
         con,
         "SELECT value FROM app_settings WHERE key = ? LIMIT 1",
         params = list(key)
@@ -12,20 +12,20 @@ settings_repository <- function(con) {
     },
 
     set = function(key, value) {
-      existing <- DBI::dbGetQuery(
+      existing <- rids_dbGetQuery(
         con,
         "SELECT COUNT(*) AS n FROM app_settings WHERE key = ?",
         params = list(key)
       )$n[[1]]
 
       if (existing > 0) {
-        DBI::dbExecute(
+        rids_dbExecute(
           con,
           "UPDATE app_settings SET value = ? WHERE key = ?",
           params = list(as.character(value), key)
         )
       } else {
-        DBI::dbExecute(
+        rids_dbExecute(
           con,
           "INSERT INTO app_settings (key, value) VALUES (?, ?)",
           params = list(key, as.character(value))

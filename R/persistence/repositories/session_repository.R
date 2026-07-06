@@ -3,7 +3,7 @@
 session_repository <- function(con) {
   list(
     insert = function(user_id, token_hash, expires_at, user_agent) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "INSERT INTO auth_sessions (user_id, token_hash, expires_at, user_agent)",
@@ -11,12 +11,12 @@ session_repository <- function(con) {
         ),
         params = list(user_id, token_hash, expires_at, user_agent)
       )
-      DBI::dbGetQuery(con, "SELECT currval('auth_session_id_seq') AS session_id")$session_id[[1]]
+      rids_dbGetQuery(con, "SELECT currval('auth_session_id_seq') AS session_id")$session_id[[1]]
     },
 
     # Most recent session (with its user row) matching a token hash.
     find_by_token_hash = function(token_hash) {
-      DBI::dbGetQuery(
+      rids_dbGetQuery(
         con,
         paste(
           "SELECT s.session_id, s.user_id, s.expires_at, s.revoked_at, s.created_at, s.user_agent,",
@@ -31,7 +31,7 @@ session_repository <- function(con) {
     },
 
     find_brief = function(session_id) {
-      DBI::dbGetQuery(
+      rids_dbGetQuery(
         con,
         paste(
           "SELECT s.session_id, s.user_id, u.username",
@@ -44,7 +44,7 @@ session_repository <- function(con) {
     },
 
     revoke = function(session_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE session_id = ? AND revoked_at IS NULL",
         params = list(session_id)
@@ -53,7 +53,7 @@ session_repository <- function(con) {
     },
 
     revoke_all_for_user = function(user_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL",
         params = list(user_id)

@@ -27,7 +27,7 @@ init_db <- function() {
 
 ## Schema (versioned migrations) ------------------------------------------------
 rids_ensure_schema <- function(con = CON) {
-  run_migrations(con, dialect = "duckdb")
+  run_migrations(con)
 }
 
 ## Startup guards ----------------------------------------------------------------
@@ -95,13 +95,13 @@ build_rules_tables <- function() {
   rids_ensure_schema()
 
   upsert_rule_row <- function(table, key_col, key_val, sql, params) {
-    exists <- dbGetQuery(
+    exists <- rids_dbGetQuery(
       CON,
       paste0("SELECT 1 FROM ", table, " WHERE ", key_col, " = ? LIMIT 1"),
       params = list(key_val)
     )
     if (nrow(exists) == 0) {
-      dbExecute(CON, sql, params = params)
+      rids_dbExecute(CON, sql, params = params)
     }
   }
 
@@ -344,25 +344,25 @@ settings_table <- function() {
   rids_ensure_schema()
 
   # Seed defaults if empty
-  count <- dbGetQuery(CON, "SELECT COUNT(*) AS n FROM app_settings")$n
+  count <- rids_dbGetQuery(CON, "SELECT COUNT(*) AS n FROM app_settings")$n
   if (count == 0) {
-    dbExecute(CON,
+    rids_dbExecute(CON,
               "INSERT INTO app_settings (key, value) VALUES (?, ?)",
               params = list("ict_upload_dir", ICT_UPLOAD_DIR)
     )
-    dbExecute(CON,
+    rids_dbExecute(CON,
               "INSERT INTO app_settings (key, value) VALUES (?, ?)",
               params = list("edge_output_dir", EDGE_OUTPUT_DIR)
     )
   }
 
   existing_keys <- tryCatch(
-    dbGetQuery(CON, "SELECT key FROM app_settings")$key,
+    rids_dbGetQuery(CON, "SELECT key FROM app_settings")$key,
     error = function(e) character()
   )
 
   if (!"log_retention_days" %in% existing_keys) {
-    dbExecute(
+    rids_dbExecute(
       CON,
       "INSERT INTO app_settings (key, value) VALUES (?, ?)",
       params = list("log_retention_days", "90")
@@ -370,7 +370,7 @@ settings_table <- function() {
   }
 
   if (!"cost_centre_matrix_file" %in% existing_keys) {
-    dbExecute(
+    rids_dbExecute(
       CON,
       "INSERT INTO app_settings (key, value) VALUES (?, ?)",
       params = list("cost_centre_matrix_file", "")
@@ -383,7 +383,7 @@ settings_table <- function() {
 specialities_table <- function() {
   rids_ensure_schema()
 
-  count <- dbGetQuery(CON, "SELECT COUNT(*) AS n FROM specialities")$n
+  count <- rids_dbGetQuery(CON, "SELECT COUNT(*) AS n FROM specialities")$n
   if (count == 0) {
     seed <- c(
       "Cancer", "Cardiology", "Dendron", "Dermatology", "ED",
@@ -392,7 +392,7 @@ specialities_table <- function() {
     )
 
     for (nm in seed) {
-      dbExecute(CON,
+      rids_dbExecute(CON,
                 "INSERT INTO specialities (name) VALUES (?) ON CONFLICT (name) DO NOTHING",
                 params = list(nm)
       )

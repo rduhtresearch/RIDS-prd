@@ -30,6 +30,6 @@ source("R/persistence/migrate.R", local = FALSE)
 #'             other RIDS DB init functions reference it).
 #' @return     Invisibly TRUE on success.
 ca_init_table <- function(con = CON) {
-  run_migrations(con, dialect = "duckdb")
+  run_migrations(con)
   invisible(TRUE)
 }

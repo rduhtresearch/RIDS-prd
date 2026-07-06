@@ -32,7 +32,7 @@ run_startup_smoke <- function(temp_root, env) {
     '              "ict_costing_tbl", "posting_lines", "app_settings", "app_logs")',
     'missing <- setdiff(required, tables)',
     'if (length(missing) > 0) stop("missing tables after startup: ", paste(missing, collapse = ", "))',
-    'close_duckdb_connection(CON)',
+    'close_primary_database(CON)',
     'cat("STARTUP_OK\\n")'
   ), script)
 
@@ -68,6 +68,27 @@ test_that("app startup works via a legacy deployment_config.R file", {
   write_deployment_config(config_path, config)
 
   run_startup_smoke(temp_root, env = c(sprintf("RIDS_CONFIG_PATH=%s", config_path)))
+})
+
+test_that("app startup works against PostgreSQL", {
+  pg_url <- trimws(Sys.getenv("RIDS_TEST_PG_URL", ""))
+  if (!nzchar(pg_url)) {
+    testthat::skip("RIDS_TEST_PG_URL not set; skipping PostgreSQL startup smoke test")
+  }
+
+  temp_root <- withr::local_tempdir("rids_startup_pg_")
+  dirs <- startup_smoke_dirs(temp_root)
+
+  run_startup_smoke(temp_root, env = c(
+    "RIDS_STORAGE_MODE=postgres",
+    sprintf("RIDS_DATABASE_URL=%s", pg_url),
+    sprintf("RIDS_ICT_UPLOAD_DIR=%s", dirs$ict_upload_dir),
+    sprintf("RIDS_EDGE_OUTPUT_DIR=%s", dirs$edge_output_dir),
+    sprintf("RIDS_APP_LOG_DIR=%s", dirs$app_log_dir),
+    "RIDS_CREDENTIAL_SECRET=startup-smoke-secret-startup-smoke-secret",
+    "RIDS_APP_STATUS=dev",
+    "RIDS_CONFIG_PATH=/nonexistent/deployment_config.R"
+  ))
 })
 
 test_that("app startup works via RIDS_* environment variables only", {

@@ -5,7 +5,7 @@
 study_repository <- function(con) {
   list(
     exists_run = function(cpms_id, study_site, scenario_id) {
-      nrow(DBI::dbGetQuery(
+      nrow(rids_dbGetQuery(
         con,
         paste(
           "SELECT 1",
@@ -20,7 +20,7 @@ study_repository <- function(con) {
     insert_meta = function(cpms_id, study_site, scenario_id, edge_id, study_name,
                            notes, uploaded_by, original_filename, saved_file_path,
                            speciality_id, mff_split_enabled, mff_split_pct) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "INSERT INTO meta_data
    (cpms_id, study_site, scenario_id, edge_id, study_name, notes, uploaded_by,
@@ -36,55 +36,61 @@ study_repository <- function(con) {
     },
 
     last_upload_id = function() {
-      DBI::dbGetQuery(con, "SELECT currval('upload_id_seq') AS upload_id")$upload_id[[1]]
+      rids_dbGetQuery(con, "SELECT currval('upload_id_seq') AS upload_id")$upload_id[[1]]
     },
 
     # Full study list for the library view (NUL-scrubbed, speciality joined).
     list_studies = function() {
-      DBI::dbGetQuery(
+      scrub <- function(column, alias) rids_scrub_nul_expr(con, column, alias)
+      rids_dbGetQuery(
         con,
-        "SELECT
-           REPLACE(m.cpms_id, chr(0), '') AS cpms_id,
-           REPLACE(m.study_site, chr(0), '') AS study_site,
-           REPLACE(m.study_name, chr(0), '') AS study_name,
-           REPLACE(m.scenario_id, chr(0), '') AS scenario_id,
-           REPLACE(m.edge_id, chr(0), '') AS edge_id,
-           REPLACE(m.uploaded_by, chr(0), '') AS uploaded_by,
-           m.speciality_id,
-           REPLACE(COALESCE(s.name, ''), chr(0), '') AS speciality_name,
-           m.upload_timestamp
-         FROM meta_data m
-         LEFT JOIN specialities s ON m.speciality_id = s.id
-         ORDER BY upload_timestamp DESC"
+        paste(
+          "SELECT",
+          scrub("m.cpms_id", "cpms_id"), ",",
+          scrub("m.study_site", "study_site"), ",",
+          scrub("m.study_name", "study_name"), ",",
+          scrub("m.scenario_id", "scenario_id"), ",",
+          scrub("m.edge_id", "edge_id"), ",",
+          scrub("m.uploaded_by", "uploaded_by"), ",",
+          "m.speciality_id,",
+          scrub("COALESCE(s.name, '')", "speciality_name"), ",",
+          "m.upload_timestamp",
+          "FROM meta_data m",
+          "LEFT JOIN specialities s ON m.speciality_id = s.id",
+          "ORDER BY upload_timestamp DESC"
+        )
       )
     },
 
     # Full metadata for one study run (NUL-scrubbed, speciality joined).
     find_meta = function(cpms_id, study_site, scenario_id) {
-      DBI::dbGetQuery(
+      scrub <- function(column, alias) rids_scrub_nul_expr(con, column, alias)
+      rids_dbGetQuery(
         con,
-        "SELECT
-           REPLACE(m.cpms_id, chr(0), '') AS cpms_id,
-           REPLACE(m.study_site, chr(0), '') AS study_site,
-           REPLACE(m.study_name, chr(0), '') AS study_name,
-           REPLACE(m.scenario_id, chr(0), '') AS scenario_id,
-           REPLACE(m.edge_id, chr(0), '') AS edge_id,
-           REPLACE(m.uploaded_by, chr(0), '') AS uploaded_by,
-           m.upload_timestamp,
-           REPLACE(m.original_filename, chr(0), '') AS original_filename,
-           REPLACE(m.notes, chr(0), '') AS notes,
-           REPLACE(m.saved_file_path, chr(0), '') AS saved_file_path,
-           REPLACE(m.edge_zip_path, chr(0), '') AS edge_zip_path,
-           m.speciality_id, s.name AS speciality_name
-         FROM meta_data m
-         LEFT JOIN specialities s ON m.speciality_id = s.id
-         WHERE m.cpms_id = ? AND m.study_site = ? AND m.scenario_id = ?",
+        paste(
+          "SELECT",
+          scrub("m.cpms_id", "cpms_id"), ",",
+          scrub("m.study_site", "study_site"), ",",
+          scrub("m.study_name", "study_name"), ",",
+          scrub("m.scenario_id", "scenario_id"), ",",
+          scrub("m.edge_id", "edge_id"), ",",
+          scrub("m.uploaded_by", "uploaded_by"), ",",
+          "m.upload_timestamp,",
+          scrub("m.original_filename", "original_filename"), ",",
+          scrub("m.notes", "notes"), ",",
+          scrub("m.saved_file_path", "saved_file_path"), ",",
+          scrub("m.edge_zip_path", "edge_zip_path"), ",",
+          "m.speciality_id, s.name AS speciality_name",
+          "FROM meta_data m",
+          "LEFT JOIN specialities s ON m.speciality_id = s.id",
+          "WHERE m.cpms_id = ? AND m.study_site = ? AND m.scenario_id = ?"
+        ),
         params = list(cpms_id, study_site, scenario_id)
       )
     },
 
     mff_config = function(cpms_id, study_site, scenario_id) {
-      DBI::dbGetQuery(
+      rids_dbGetQuery(
         con,
         paste(
           "SELECT mff_split_enabled, mff_split_pct",
@@ -97,7 +103,7 @@ study_repository <- function(con) {
     },
 
     set_edge_zip_path = function(zip_path, cpms_id, study_site, scenario_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "UPDATE meta_data SET edge_zip_path = ?",
@@ -109,7 +115,7 @@ study_repository <- function(con) {
     },
 
     find_run_files = function(cpms_id, study_site, scenario_id) {
-      DBI::dbGetQuery(
+      rids_dbGetQuery(
         con,
         paste(
           "SELECT id, saved_file_path, edge_zip_path",
@@ -134,7 +140,7 @@ study_repository <- function(con) {
 
       DBI::dbWithTransaction(con, {
         if (DBI::dbExistsTable(con, "addon_custom_activities")) {
-          counts$addon_custom_activities <- as.integer(DBI::dbExecute(
+          counts$addon_custom_activities <- as.integer(rids_dbExecute(
             con,
             paste(
               "DELETE FROM addon_custom_activities",
@@ -145,7 +151,7 @@ study_repository <- function(con) {
         }
 
         if (DBI::dbExistsTable(con, "posting_lines")) {
-          counts$posting_lines <- as.integer(DBI::dbExecute(
+          counts$posting_lines <- as.integer(rids_dbExecute(
             con,
             paste(
               "DELETE FROM posting_lines",
@@ -156,7 +162,7 @@ study_repository <- function(con) {
         }
 
         if (DBI::dbExistsTable(con, "ict_costing_tbl")) {
-          counts$ict_costing_tbl <- as.integer(DBI::dbExecute(
+          counts$ict_costing_tbl <- as.integer(rids_dbExecute(
             con,
             paste(
               "DELETE FROM ict_costing_tbl",
@@ -168,7 +174,7 @@ study_repository <- function(con) {
 
         if (DBI::dbExistsTable(con, "app_logs") && length(upload_ids) > 0) {
           counts$app_logs <- sum(vapply(upload_ids, function(upload_id) {
-            as.integer(DBI::dbExecute(
+            as.integer(rids_dbExecute(
               con,
               "DELETE FROM app_logs WHERE upload_id = ?",
               params = list(upload_id)
@@ -176,7 +182,7 @@ study_repository <- function(con) {
           }, integer(1)))
         }
 
-        counts$meta_data <- as.integer(DBI::dbExecute(
+        counts$meta_data <- as.integer(rids_dbExecute(
           con,
           paste(
             "DELETE FROM meta_data",

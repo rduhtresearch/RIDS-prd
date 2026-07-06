@@ -25,7 +25,7 @@ app_log_repository <- function(con) {
         sql <- paste(sql, "LIMIT", as.integer(limit))
       }
 
-      DBI::dbGetQuery(con, sql, params = params)
+      rids_dbGetQuery(con, sql, params = params)
     },
 
     distinct_values = function(column) {
@@ -38,12 +38,12 @@ app_log_repository <- function(con) {
         "WHERE ", column, " IS NOT NULL AND trim(", column, ") <> '' ",
         "ORDER BY ", column
       )
-      vals <- DBI::dbGetQuery(con, sql)[[1]]
+      vals <- rids_dbGetQuery(con, sql)[[1]]
       vals[!is.na(vals) & nzchar(vals)]
     },
 
     prune_before = function(cutoff) {
-      as.integer(DBI::dbExecute(
+      as.integer(rids_dbExecute(
         con,
         "DELETE FROM app_logs WHERE timestamp < ?",
         params = list(cutoff)

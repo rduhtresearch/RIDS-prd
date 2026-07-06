@@ -4,7 +4,7 @@ auth_audit_repository <- function(con) {
   list(
     record = function(event_type, user_id, actor_user_id, username, success,
                       message, session_id) {
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         paste(
           "INSERT INTO auth_audit_log",

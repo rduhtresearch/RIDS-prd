@@ -1,3 +1,5 @@
+source("R/persistence/db_helpers.R", local = FALSE)
+
 # Versioned schema migrations.
 #
 # Migrations live in R/persistence/migrations/<dialect>/ as ordered files:
@@ -38,7 +40,7 @@ rids_applied_migrations <- function(con) {
   DBI::dbGetQuery(con, "SELECT version FROM schema_migrations")$version
 }
 
-run_migrations <- function(con, dialect = "duckdb", migrations_dir = rids_migrations_dir(dialect)) {
+run_migrations <- function(con, dialect = rids_dialect_for(con), migrations_dir = rids_migrations_dir(dialect)) {
   if (!dir.exists(migrations_dir)) {
     stop("Migrations directory not found: ", migrations_dir,
          " (working directory: ", getwd(), ")")
@@ -72,7 +74,7 @@ run_migrations <- function(con, dialect = "duckdb", migrations_dir = rids_migrat
         migration_env$migrate(con)
       }
 
-      DBI::dbExecute(
+      rids_dbExecute(
         con,
         "INSERT INTO schema_migrations (version) VALUES (?)",
         params = list(version)

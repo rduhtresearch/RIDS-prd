@@ -4,7 +4,7 @@
 speciality_repository <- function(con) {
   list(
     list_active = function() {
-      DBI::dbGetQuery(con, "
+      rids_dbGetQuery(con, "
         SELECT id, name
         FROM specialities
         WHERE archived_at IS NULL
