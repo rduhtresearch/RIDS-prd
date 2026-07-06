@@ -339,3 +339,38 @@ wrapper over `tests/testthat.R`.
 Full suite with PostgreSQL integration enabled: 217 pass / 0 fail /
 0 warnings. App boots end-to-end via env-var-only config against both
 DuckDB and PostgreSQL.
+
+## Phase 5 — Documentation and final sweep
+
+- `docs/architecture.md` — the code layout, layer rules, startup sequence,
+  and test strategy in one page.
+- `docs/sql-server-adapter.md` — the SQL Server adapter design: what the
+  existing boundaries already isolate, the T-SQL dialect differences to
+  handle, implementation order, and the parameterized integration suite as
+  the definition of done.
+- `README.md` and `DEPLOYMENT.md` rewritten for the containerized model
+  (env-var configuration, docker compose, hosted deployment incl. Supabase,
+  first-run admin + MFA enrollment, backend switching, upgrades). The old
+  versions documented the deleted Windows shared-drive process.
+- Final sweep: deleted `R/dependencies.R` (orphaned — its only consumer was
+  the deleted Prepare launcher script; `DESCRIPTION` and the Dockerfile now
+  declare dependencies). Verified zero remaining references to
+  `%LOCALAPPDATA%`, `P:\` paths, or launcher scripts anywhere in code or
+  docs.
+
+## Final state vs. original success criteria
+
+- **Behavior preserved**: every original test assertion still runs and
+  passes; the only behavior changes are the two the user approved
+  (MFA-gated reset replacing the insecure one; developer role removed).
+- **Leaner**: dead scratch files, the entire Windows/shared-drive
+  deployment machinery (~1,900 lines incl. its tests), vestigial config
+  keys, and the T-SQL fossil are gone, with rationale recorded above.
+- **Runs in Docker**: `docker compose up` (Postgres) or DuckDB mode.
+- **Hostable**: env-var config, non-root image, boot-time migrations,
+  provider-native backups, TLS via ingress.
+- **MFA**: mandatory TOTP with recovery codes, admin MFA reset,
+  MFA-gated self-service password reset.
+- **No Supabase lock-in**: Supabase is just a PostgreSQL connection string.
+- **SQL Server path**: same repositories and migration runner; the design
+  doc enumerates the (small) dialect surface left to implement.
