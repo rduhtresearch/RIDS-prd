@@ -6,6 +6,8 @@ suppressPackageStartupMessages({
   library(purrr)
 })
 
+source("R/persistence/repositories/ict_costing_repository.R", local = FALSE)
+
 # source(file.path(APP_DIR, "utils", "add_study_arm.r"))
 
 
@@ -229,43 +231,19 @@ build_ua_ssp_lookup_from_sheet <- function(df, study_value, cpms_id, visit_label
 persist_ict_to_duckdb <- function(db_path, ict_cost_table) {
   require_pkg("DBI")
   require_pkg("duckdb")
-  
+
   con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path)
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-  
+
   ict_cost_table$Contract_Cost <- NA_real_
-  
+
   # Reorder columns to match table schema exactly
   ict_cost_table <- ict_cost_table[, c(
     "CPMS_ID", "study_site", "scenario_id", "Study", "Visit_Number", "Study_Arm", "Visit_Label",
     "Activity_Name", "ICT_Cost", "Contract_Cost", "activity_occurrence_id", "staff_group"
   )]
-  
-  DBI::dbWithTransaction(con, {
-    DBI::dbWriteTable(con, "stg_ict_costing_tbl", ict_cost_table, overwrite = TRUE)
-    
-    DBI::dbExecute(con, "
-      DELETE FROM ict_costing_tbl
-      WHERE (CPMS_ID, study_site, scenario_id) IN (
-        SELECT DISTINCT CPMS_ID, study_site, scenario_id
-        FROM stg_ict_costing_tbl
-      )
-    ")
-    
-    DBI::dbExecute(con, "
-      INSERT INTO ict_costing_tbl (
-        CPMS_ID, study_site, scenario_id, Study, Visit_Number, Study_Arm, Visit_Label,
-        Activity_Name, ICT_Cost, Contract_Cost, activity_occurrence_id, staff_group
-      )
-      SELECT
-        CPMS_ID, study_site, scenario_id, Study, Visit_Number, Study_Arm, Visit_Label,
-        Activity_Name, ICT_Cost, Contract_Cost, activity_occurrence_id, staff_group
-      FROM stg_ict_costing_tbl
-    ")
-    
-    DBI::dbExecute(con, "DROP TABLE stg_ict_costing_tbl")
-  })
-  invisible(TRUE)
+
+  ict_costing_repository(con)$replace_from_staging(ict_cost_table)
 }
 
 # ── Stage A ───────────────────────────────────────────────────────────────────

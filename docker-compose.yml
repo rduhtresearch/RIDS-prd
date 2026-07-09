@@ -1,0 +1,51 @@
+# Local development stack.
+#
+#   docker compose up --build         # app + local PostgreSQL
+#
+# DuckDB mode instead (no db service needed):
+#   RIDS_STORAGE_MODE=duckdb RIDS_DB_DIR=/app/data/RIDS.duckdb docker compose up app
+#
+# Configuration comes from .env (see .env.example). Never commit .env.
+
+services:
+  app:
+    build: .
+    ports:
+      - "${RIDS_APP_PORT:-3838}:3838"
+    environment:
+      RIDS_STORAGE_MODE: ${RIDS_STORAGE_MODE:-postgres}
+      RIDS_DATABASE_URL: ${RIDS_DATABASE_URL:-postgres://rids:${POSTGRES_PASSWORD:-rids-dev-password}@db:5432/rids}
+      RIDS_DB_DIR: ${RIDS_DB_DIR:-/app/data/RIDS.duckdb}
+      RIDS_CREDENTIAL_SECRET: ${RIDS_CREDENTIAL_SECRET:?set RIDS_CREDENTIAL_SECRET in .env (16+ chars)}
+      RIDS_APP_STATUS: ${RIDS_APP_STATUS:-dev}
+      RIDS_AUTH_SESSION_HOURS: ${RIDS_AUTH_SESSION_HOURS:-10}
+    volumes:
+      - rids_data:/app/data
+      - rids_uploads:/app/uploads
+      - rids_outputs:/app/outputs
+      - rids_logs:/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+        required: false
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: rids
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rids-dev-password}
+      POSTGRES_DB: rids
+    volumes:
+      - rids_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rids -d rids"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  rids_data:
+  rids_uploads:
+  rids_outputs:
+  rids_logs:
+  rids_pgdata:

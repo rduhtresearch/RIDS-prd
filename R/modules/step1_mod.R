@@ -87,12 +87,7 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
     
     # ── Specialities lookup (loaded once at module init) ─────────────────────
     specialities <- reactive({
-      dbGetQuery(CON, "
-        SELECT id, name
-        FROM specialities
-        WHERE archived_at IS NULL
-        ORDER BY name
-      ")
+      rids_repos()$specialities$list_active()
     })
     
     observe({
@@ -376,21 +371,11 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       req(extracted_cpms)
 
       duplicate_exists <- tryCatch({
-        existing <- DBI::dbGetQuery(
-          CON,
-          paste(
-            "SELECT 1",
-            "FROM meta_data",
-            "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?",
-            "LIMIT 1"
-          ),
-          params = list(
-            sanitize_text_value(as.character(extracted_cpms)),
-            sanitize_text_value(input$study_site),
-            sanitize_text_value(input$scenario)
-          )
+        rids_repos()$studies$exists_run(
+          sanitize_text_value(as.character(extracted_cpms)),
+          sanitize_text_value(input$study_site),
+          sanitize_text_value(input$scenario)
         )
-        nrow(existing) > 0
       }, error = function(e) {
         if (handle_fatal_db_error(session, e, "step1", list(
           cpms_id = extracted_cpms,
@@ -429,25 +414,19 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       }
       
       meta_saved <- tryCatch({
-        DBI::dbExecute(CON,
-                     "INSERT INTO meta_data 
-   (cpms_id, study_site, scenario_id, edge_id, study_name, notes, uploaded_by, 
-    original_filename, saved_file_path, speciality_id, mff_split_enabled, mff_split_pct)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                     params = list(
-                       sanitize_text_value(as.character(extracted_cpms)),
-                       sanitize_text_value(input$study_site),
-                       sanitize_text_value(input$scenario),
-                       sanitize_text_value(input$edge_id),
-                       sanitize_text_value(input$study_name),
-                       sanitize_text_value(input$notes),
-                       sanitize_text_value(auth_state$username %||% auth_state$name %||% ""),
-                       sanitize_text_value(original_name),
-                       sanitize_text_value(saved_path),
-                       as.integer(input$speciality_id),
-                       isTRUE(input$mff_split_enabled),
-                       if (isTRUE(input$mff_split_enabled)) as.numeric(input$mff_split_pct) else 0
-                     )
+        rids_repos()$studies$insert_meta(
+          cpms_id = sanitize_text_value(as.character(extracted_cpms)),
+          study_site = sanitize_text_value(input$study_site),
+          scenario_id = sanitize_text_value(input$scenario),
+          edge_id = sanitize_text_value(input$edge_id),
+          study_name = sanitize_text_value(input$study_name),
+          notes = sanitize_text_value(input$notes),
+          uploaded_by = sanitize_text_value(auth_state$username %||% auth_state$name %||% ""),
+          original_filename = sanitize_text_value(original_name),
+          saved_file_path = sanitize_text_value(saved_path),
+          speciality_id = as.integer(input$speciality_id),
+          mff_split_enabled = isTRUE(input$mff_split_enabled),
+          mff_split_pct = if (isTRUE(input$mff_split_enabled)) as.numeric(input$mff_split_pct) else 0
         )
         TRUE
       }, error = function(e) {
@@ -491,7 +470,7 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       }
 
       upload_id <- tryCatch({
-        DBI::dbGetQuery(CON, "SELECT currval('upload_id_seq') AS upload_id")$upload_id[[1]]
+        rids_repos()$studies$last_upload_id()
       }, error = function(e) {
         NA_integer_
       })

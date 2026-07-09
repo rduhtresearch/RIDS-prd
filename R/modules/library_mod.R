@@ -171,22 +171,7 @@ libraryServer <- function(id, auth_state, shared_state) {
     pending_delete <- reactiveVal(NULL)
 
     fetch_studies <- function() {
-      DBI::dbGetQuery(
-        CON,
-        "SELECT
-           REPLACE(m.cpms_id, chr(0), '') AS cpms_id,
-           REPLACE(m.study_site, chr(0), '') AS study_site,
-           REPLACE(m.study_name, chr(0), '') AS study_name,
-           REPLACE(m.scenario_id, chr(0), '') AS scenario_id,
-           REPLACE(m.edge_id, chr(0), '') AS edge_id,
-           REPLACE(m.uploaded_by, chr(0), '') AS uploaded_by,
-           m.speciality_id,
-           REPLACE(COALESCE(s.name, ''), chr(0), '') AS speciality_name,
-           m.upload_timestamp
-         FROM meta_data m
-         LEFT JOIN specialities s ON m.speciality_id = s.id
-         ORDER BY upload_timestamp DESC"
-      )
+      rids_repos()$studies$list_studies()
     }
 
     build_study_ref <- function(row) {

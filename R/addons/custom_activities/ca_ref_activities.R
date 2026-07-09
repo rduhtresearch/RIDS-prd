@@ -35,47 +35,25 @@ suppressPackageStartupMessages({
 
 # ── Schema ───────────────────────────────────────────────────────────────────
 
-#' Initialise the ref_custom_activities table and seed on first run.
+#' Ensure the ref_custom_activities table exists and seed/top-up entries.
 #'
-#' Idempotent. Safe to call from db_main() on every app start.
+#' Idempotent. Safe to call from db_main() on every app start. The table DDL
+#' lives in the versioned migrations; this seeds new entries from
+#' .CA_REF_ACTIVITIES_SEED (ON CONFLICT no-op for existing, so admin edits
+#' and historical entries are never overwritten).
 #'
 #' @param con  DuckDB connection (defaults to global CON).
 #' @return     Invisibly TRUE.
 ca_init_ref_activities <- function(con = CON) {
-  
-  dbExecute(con, "
-    CREATE SEQUENCE IF NOT EXISTS ref_custom_activities_id_seq START 1;
-  ")
-  
-  dbExecute(con, "
-    CREATE TABLE IF NOT EXISTS ref_custom_activities (
-      id           INTEGER PRIMARY KEY DEFAULT nextval('ref_custom_activities_id_seq'),
-      name         TEXT NOT NULL UNIQUE,
-      archived_at  TIMESTAMP,
-      created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-  ")
-  
-  # Seed only when empty — protects against overwriting admin edits later.
-  count <- dbGetQuery(con, "SELECT COUNT(*) AS n FROM ref_custom_activities")$n
-  if (count == 0) {
-    for (nm in .CA_REF_ACTIVITIES_SEED) {
-      dbExecute(con,
-                "INSERT INTO ref_custom_activities (name) VALUES (?)
-                 ON CONFLICT (name) DO NOTHING",
-                params = list(nm))
-    }
-  } else {
-    # Even after first seed, top up any NEW entries that have been added to the
-    # seed vector since last startup. ON CONFLICT means no-op for existing.
-    for (nm in .CA_REF_ACTIVITIES_SEED) {
-      dbExecute(con,
-                "INSERT INTO ref_custom_activities (name) VALUES (?)
-                 ON CONFLICT (name) DO NOTHING",
-                params = list(nm))
-    }
+  run_migrations(con)
+
+  for (nm in .CA_REF_ACTIVITIES_SEED) {
+    rids_dbExecute(con,
+              "INSERT INTO ref_custom_activities (name) VALUES (?)
+               ON CONFLICT (name) DO NOTHING",
+              params = list(nm))
   }
-  
+
   invisible(TRUE)
 }
 

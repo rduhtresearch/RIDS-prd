@@ -329,18 +329,10 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
       {
       req(shared_state$cpms_id, shared_state$study_site, shared_state$scenario_id)
 
-      df <- DBI::dbGetQuery(
-        CON,
-        "SELECT CPMS_ID, study_site, scenario_id, Study, Visit_Number, Study_Arm,
-         Visit_Label, Activity_Name, ICT_Cost, Contract_Cost,
-         activity_occurrence_id, staff_group
-         FROM ict_costing_tbl
-         WHERE CPMS_ID = ? AND study_site = ? AND scenario_id = ?",
-         params = list(
-           as.character(shared_state$cpms_id),
-           as.character(shared_state$study_site),
-           as.character(shared_state$scenario_id)
-         )
+      df <- rids_repos()$ict_costing$find_by_run(
+        as.character(shared_state$cpms_id),
+        as.character(shared_state$study_site),
+        as.character(shared_state$scenario_id)
       )
       
       working_data$df <- step2_prepare_working_data(
@@ -440,20 +432,12 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
       app_log_info("step2", "Save started")
       
       tryCatch({
-        DBI::dbWithTransaction(CON, {
-          dbExecute(CON,
-                    paste(
-                      "DELETE FROM ict_costing_tbl",
-                      "WHERE CPMS_ID = ? AND study_site = ? AND scenario_id = ?"
-                    ),
-                    params = list(
-                      as.character(shared_state$cpms_id),
-                      as.character(shared_state$study_site),
-                      as.character(shared_state$scenario_id)
-                    )
-          )
-          dbAppendTable(CON, "ict_costing_tbl", step2_strip_state_columns(working_data$df))
-        })
+        rids_repos()$ict_costing$replace_run(
+          step2_strip_state_columns(working_data$df),
+          as.character(shared_state$cpms_id),
+          as.character(shared_state$study_site),
+          as.character(shared_state$scenario_id)
+        )
 
         log_event(
           level = "INFO",

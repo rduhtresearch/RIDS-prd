@@ -1,0 +1,11 @@
+.git
+.env
+data/
+uploads/
+outputs/
+logs/
+deployment/
+releases/
+shared/
+*.duckdb
+*.duckdb.wal

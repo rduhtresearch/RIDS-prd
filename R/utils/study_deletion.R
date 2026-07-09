@@ -2,6 +2,8 @@ suppressPackageStartupMessages({
   library(DBI)
 })
 
+source("R/persistence/repositories/study_repository.R", local = FALSE)
+
 validate_study_run_identity <- function(cpms_id, study_site, scenario_id) {
   values <- list(
     cpms_id = cpms_id,
@@ -22,82 +24,18 @@ validate_study_run_identity <- function(cpms_id, study_site, scenario_id) {
 
 delete_study_run <- function(cpms_id, study_site, scenario_id, con = CON, delete_files = TRUE) {
   run_ref <- validate_study_run_identity(cpms_id, study_site, scenario_id)
+  studies <- study_repository(con)
 
-  meta <- dbGetQuery(
-    con,
-    paste(
-      "SELECT id, saved_file_path, edge_zip_path",
-      "FROM meta_data",
-      "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?"
-    ),
-    params = unname(run_ref)
-  )
+  meta <- studies$find_run_files(run_ref$cpms_id, run_ref$study_site, run_ref$scenario_id)
 
   upload_ids <- unique(as.character(meta$id[!is.na(meta$id)]))
   file_paths <- unique(c(meta$saved_file_path, meta$edge_zip_path))
   file_paths <- file_paths[!is.na(file_paths) & nzchar(trimws(file_paths))]
 
-  counts <- list(
-    addon_custom_activities = 0L,
-    posting_lines = 0L,
-    ict_costing_tbl = 0L,
-    app_logs = 0L,
-    meta_data = 0L
+  counts <- studies$delete_run(
+    run_ref$cpms_id, run_ref$study_site, run_ref$scenario_id,
+    upload_ids = upload_ids
   )
-
-  dbWithTransaction(con, {
-    if (dbExistsTable(con, "addon_custom_activities")) {
-      counts$addon_custom_activities <- as.integer(dbExecute(
-        con,
-        paste(
-          "DELETE FROM addon_custom_activities",
-          "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?"
-        ),
-        params = unname(run_ref)
-      ))
-    }
-
-    if (dbExistsTable(con, "posting_lines")) {
-      counts$posting_lines <- as.integer(dbExecute(
-        con,
-        paste(
-          "DELETE FROM posting_lines",
-          "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?"
-        ),
-        params = unname(run_ref)
-      ))
-    }
-
-    if (dbExistsTable(con, "ict_costing_tbl")) {
-      counts$ict_costing_tbl <- as.integer(dbExecute(
-        con,
-        paste(
-          "DELETE FROM ict_costing_tbl",
-          "WHERE CPMS_ID = ? AND study_site = ? AND scenario_id = ?"
-        ),
-        params = unname(run_ref)
-      ))
-    }
-
-    if (dbExistsTable(con, "app_logs") && length(upload_ids) > 0) {
-      counts$app_logs <- sum(vapply(upload_ids, function(upload_id) {
-        as.integer(dbExecute(
-          con,
-          "DELETE FROM app_logs WHERE upload_id = ?",
-          params = list(upload_id)
-        ))
-      }, integer(1)))
-    }
-
-    counts$meta_data <- as.integer(dbExecute(
-      con,
-      paste(
-        "DELETE FROM meta_data",
-        "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?"
-      ),
-      params = unname(run_ref)
-    ))
-  })
 
   file_results <- list(
     deleted = character(0),

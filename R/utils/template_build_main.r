@@ -1,7 +1,7 @@
 # template_build_main.r
 #
 # Cost adjustment, EDGE key assignment, and EDGE template generation.
-# Sourced by app.R — do not modify pipeline_fixed.r or posting_test.r.
+# Sourced by app.R — do not modify pipeline_fixed.r or posting_engine.r.
 #
 # Entry points (called in order by app.R):
 #   1. adjust_posting_lines(out)             -> posting_lines_adjusted

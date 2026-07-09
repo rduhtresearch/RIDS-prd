@@ -173,10 +173,7 @@ run_user_api_credential_tests <- function() {
     paste0('EDGE_OUTPUT_DIR <- "', normalizePath(file.path(temp_root, "outputs"), winslash = "/", mustWork = FALSE), '"'),
     paste0('APP_LOG_DIR <- "', normalizePath(file.path(temp_root, "logs"), winslash = "/", mustWork = FALSE), '"'),
     'APP_HOST <- "127.0.0.1"',
-    'APP_PORT <- 3838L',
-    'SQL_SERVER <- ""',
-    'SQL_DATABASE <- ""',
-    'SQL_DRIVER <- ""'
+    'APP_PORT <- 3838L'
   ), config_path, useBytes = TRUE)
 
   config_error <- tryCatch({

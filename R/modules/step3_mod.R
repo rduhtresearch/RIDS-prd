@@ -195,19 +195,10 @@ step3_Server <- function(id, auth_state, shared_state, current_step) {
         app_log_info("step3", "Posting evaluation started")
 
         study_mff_config <- tryCatch({
-          cfg <- DBI::dbGetQuery(
-            CON,
-            paste(
-              "SELECT mff_split_enabled, mff_split_pct",
-              "FROM meta_data",
-              "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?",
-              "LIMIT 1"
-            ),
-            params = list(
-              as.character(shared_state$cpms_id),
-              as.character(shared_state$study_site),
-              as.character(shared_state$scenario_id)
-            )
+          cfg <- rids_repos()$studies$mff_config(
+            as.character(shared_state$cpms_id),
+            as.character(shared_state$study_site),
+            as.character(shared_state$scenario_id)
           )
 
           if (nrow(cfg) == 0) {

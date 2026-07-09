@@ -69,10 +69,46 @@ loginUI <- function(id) {
 
           shinyjs::hidden(
             div(
+              id = ns("mfa_view"),
+              div(
+                class = "login-form",
+                textInput(ns("mfa_code"), "Authentication code")
+              ),
+              actionButton(ns("verify_mfa"), "Verify", class = "btn-primary login-button"),
+              actionLink(ns("mfa_back_to_login"), "Back to sign in", class = "login-link"),
+              p(
+                class = "login-note",
+                "Enter the 6-digit code from your authenticator app, or one of your recovery codes."
+              )
+            )
+          ),
+
+          shinyjs::hidden(
+            div(
+              id = ns("mfa_enroll_view"),
+              p(
+                class = "login-note",
+                "Two-factor authentication is required. Add this account to your",
+                " authenticator app (Google Authenticator, Authy, 1Password, ...)",
+                " using the setup key below, then enter the current code to finish."
+              ),
+              uiOutput(ns("enroll_secret_ui")),
+              div(
+                class = "login-form",
+                textInput(ns("enroll_code"), "Code from your authenticator app")
+              ),
+              actionButton(ns("confirm_enrollment"), "Activate two-factor authentication", class = "btn-primary login-button"),
+              actionLink(ns("enroll_back_to_login"), "Back to sign in", class = "login-link")
+            )
+          ),
+
+          shinyjs::hidden(
+            div(
               id = ns("password_reset_view"),
               div(
                 class = "login-form",
                 textInput(ns("reset_username"), "Username"),
+                textInput(ns("reset_code"), "Authentication code"),
                 passwordInput(ns("reset_new_password"), "New password"),
                 passwordInput(ns("reset_confirm_password"), "Confirm new password")
               ),
@@ -80,7 +116,9 @@ loginUI <- function(id) {
               actionLink(ns("back_to_login"), "Back to sign in", class = "login-link"),
               p(
                 class = "login-note",
-                "Temporary local-only reset for the current deployment."
+                "Enter the 6-digit code from your authenticator app (or a recovery code)",
+                " to prove it's you. If you've lost access to your authenticator,",
+                " contact an administrator."
               )
             )
           ),
@@ -116,6 +154,8 @@ loginUI <- function(id) {
 
 loginServer <- function(id) {
   moduleServer(id, function(input, output, session) {
+    auth_provider <- build_auth_provider()
+
     auth_state <- reactiveValues(
       logged_in = FALSE,
       user_id = NULL,
@@ -130,11 +170,15 @@ loginServer <- function(id) {
     )
 
     bootstrap_needed <- reactiveVal(!users_exist())
+    pending_mfa_user <- reactiveVal(NULL)
+    pending_enrollment <- reactiveVal(NULL)
 
     show_view <- function(view_id) {
       shinyjs::hide("login_view")
       shinyjs::hide("bootstrap_view")
       shinyjs::hide("password_change_view")
+      shinyjs::hide("mfa_view")
+      shinyjs::hide("mfa_enroll_view")
       shinyjs::hide("password_reset_view")
       shinyjs::show(view_id)
     }
@@ -151,8 +195,16 @@ loginServer <- function(id) {
       updateTextInput(session, "new_password", value = "")
       updateTextInput(session, "confirm_password", value = "")
       updateTextInput(session, "reset_username", value = "")
+      updateTextInput(session, "reset_code", value = "")
       updateTextInput(session, "reset_new_password", value = "")
       updateTextInput(session, "reset_confirm_password", value = "")
+      updateTextInput(session, "mfa_code", value = "")
+      updateTextInput(session, "enroll_code", value = "")
+    }
+
+    clear_pending_mfa <- function() {
+      pending_mfa_user(NULL)
+      pending_enrollment(NULL)
     }
 
     clear_auth_state <- function(reset_app_state = TRUE) {
@@ -181,7 +233,7 @@ loginServer <- function(id) {
 
     auth_state$logout <- function(reset_app_state = TRUE) {
       if (!is.null(auth_state$session_id)) {
-        revoke_auth_session(
+        auth_provider$revoke_session(
           session_id = auth_state$session_id,
           actor_user_id = auth_state$user_id,
           event_type = "logout",
@@ -203,7 +255,7 @@ loginServer <- function(id) {
         return(list(success = FALSE, message = "No active user session."))
       }
 
-      result <- change_user_password(
+      result <- auth_provider$change_password(
         user_id = auth_state$user_id,
         current_password = current_password,
         new_password = new_password,
@@ -211,7 +263,7 @@ loginServer <- function(id) {
       )
 
       if (isTRUE(result$success)) {
-        refreshed_user <- get_user_by_id(auth_state$user_id)
+        refreshed_user <- auth_provider$get_user_by_id(auth_state$user_id)
         if (!is.null(refreshed_user)) {
           apply_user_state(refreshed_user, session_id = auth_state$session_id)
         }
@@ -221,14 +273,14 @@ loginServer <- function(id) {
     }
 
     complete_login <- function(user_row, event_label = "Login successful.") {
-      session_result <- create_auth_session(
+      session_result <- auth_provider$create_session(
         user_id = user_row$user_id[[1]],
         user_agent = session$request$HTTP_USER_AGENT,
         duration_hours = session_duration_hours()
       )
 
-      touch_last_login(user_row$user_id[[1]])
-      refreshed_user <- get_user_by_id(user_row$user_id[[1]])
+      auth_provider$touch_last_login(user_row$user_id[[1]])
+      refreshed_user <- auth_provider$get_user_by_id(user_row$user_id[[1]])
       apply_user_state(refreshed_user, session_id = session_result$session_id)
 
       session$sendCustomMessage(
@@ -257,8 +309,56 @@ loginServer <- function(id) {
       showNotification(event_label, type = "message", duration = 5)
     }
 
+    # After password verification, gate session issuance behind MFA:
+    # enrolled users get the challenge view; unenrolled users must enroll.
+    begin_mfa_stage <- function(user_row, event_label = "Login successful.") {
+      pending_mfa_user(list(user = user_row, event_label = event_label))
+
+      if (isTRUE(auth_provider$mfa_enrolled(user_row$user_id[[1]]))) {
+        show_view("mfa_view")
+      } else {
+        enrollment <- auth_provider$start_mfa_enrollment(
+          user_id = user_row$user_id[[1]],
+          username = user_row$username[[1]]
+        )
+        pending_enrollment(enrollment)
+        show_view("mfa_enroll_view")
+      }
+    }
+
+    finish_mfa_stage <- function() {
+      pending <- pending_mfa_user()
+      req(pending)
+
+      complete_login(pending$user, event_label = pending$event_label)
+      clear_pending_mfa()
+      clear_password_fields()
+      auth_state$auth_ready <- TRUE
+      show_view("login_view")
+    }
+
+    output$enroll_secret_ui <- renderUI({
+      enrollment <- pending_enrollment()
+      req(enrollment)
+
+      div(
+        class = "login-note",
+        style = "text-align: left; word-break: break-all;",
+        p(tags$strong("Setup key: "), tags$code(enrollment$secret)),
+        p(
+          style = "font-size: 0.7rem;",
+          "Or add by URL: ",
+          tags$code(enrollment$provisioning_uri)
+        )
+      )
+    })
+
     observe({
       if (!isTRUE(auth_state$auth_ready)) {
+        return()
+      }
+
+      if (!is.null(pending_mfa_user())) {
         return()
       }
 
@@ -276,7 +376,7 @@ loginServer <- function(id) {
       req(input$password != "")
 
       login_result <- tryCatch({
-        authenticate_user(input$username, input$password)
+        auth_provider$authenticate(input$username, input$password)
       }, error = function(e) {
         app_log_exception("auth", "Login request failed", e, list(username = trimws(input$username)))
         NULL
@@ -289,9 +389,70 @@ loginServer <- function(id) {
         return()
       }
 
-      complete_login(login_result$user)
+      begin_mfa_stage(login_result$user)
+    })
+
+    observeEvent(input$verify_mfa, {
+      pending <- pending_mfa_user()
+      req(pending)
+
+      result <- tryCatch({
+        auth_provider$verify_mfa(pending$user$user_id[[1]], input$mfa_code)
+      }, error = function(e) {
+        app_log_exception("auth", "MFA verification failed", e, list(user_id = pending$user$user_id[[1]]))
+        NULL
+      })
+
+      if (is.null(result) || !isTRUE(result$success)) {
+        feedbackDanger("mfa_code", show = TRUE, text = "Invalid code.")
+        showNotification("That code didn't work. Try again.", type = "warning", duration = 5)
+        return()
+      }
+
+      finish_mfa_stage()
+    })
+
+    observeEvent(input$confirm_enrollment, {
+      pending <- pending_mfa_user()
+      req(pending)
+
+      result <- tryCatch({
+        auth_provider$confirm_mfa_enrollment(pending$user$user_id[[1]], input$enroll_code)
+      }, error = function(e) {
+        app_log_exception("auth", "MFA enrollment failed", e, list(user_id = pending$user$user_id[[1]]))
+        NULL
+      })
+
+      if (is.null(result) || !isTRUE(result$success)) {
+        feedbackDanger("enroll_code", show = TRUE, text = result$message %||% "Invalid code.")
+        return()
+      }
+
+      showModal(modalDialog(
+        title = "Recovery codes",
+        p(
+          "Store these one-time recovery codes somewhere safe. Each works once",
+          " if you ever lose access to your authenticator app. They will not be",
+          " shown again."
+        ),
+        tags$pre(paste(result$recovery_codes, collapse = "\n")),
+        easyClose = FALSE,
+        footer = modalButton("I've saved these codes")
+      ))
+
+      finish_mfa_stage()
+    })
+
+    observeEvent(input$mfa_back_to_login, {
+      clear_pending_mfa()
       clear_password_fields()
-      auth_state$auth_ready <- TRUE
+      show_view("login_view")
+    })
+
+    observeEvent(input$enroll_back_to_login, {
+      clear_pending_mfa()
+      clear_password_fields()
+      show_view("login_view")
     })
 
     observeEvent(input$bootstrap_admin, {
@@ -318,7 +479,7 @@ loginServer <- function(id) {
       }
 
       result <- tryCatch({
-        bootstrap_admin_account(
+        auth_provider$bootstrap_admin(
           name = input$bootstrap_name,
           username = input$bootstrap_username,
           password = input$bootstrap_password
@@ -338,9 +499,7 @@ loginServer <- function(id) {
       }
 
       sync_bootstrap_state()
-      complete_login(result$user, event_label = "Admin account created.")
-      clear_password_fields()
-      auth_state$auth_ready <- TRUE
+      begin_mfa_stage(result$user, event_label = "Admin account created.")
     })
 
     observeEvent(input$forgot_password, {
@@ -390,6 +549,11 @@ loginServer <- function(id) {
         return()
       }
 
+      if (trimws(input$reset_code) == "") {
+        feedbackDanger("reset_code", show = TRUE, text = "Required")
+        return()
+      }
+
       if (nchar(input$reset_new_password) < 8) {
         feedbackDanger("reset_new_password", show = TRUE, text = "Minimum 8 characters")
         return()
@@ -401,12 +565,13 @@ loginServer <- function(id) {
       }
 
       result <- tryCatch({
-        reset_user_password_by_username(
+        auth_provider$reset_password_with_mfa(
           username = input$reset_username,
+          code = input$reset_code,
           new_password = input$reset_new_password
         )
       }, error = function(e) {
-        app_log_exception("auth", "Username-only password reset failed", e, list(username = trimws(input$reset_username)))
+        app_log_exception("auth", "MFA password reset failed", e, list(username = trimws(input$reset_username)))
         NULL
       })
 
@@ -441,7 +606,7 @@ loginServer <- function(id) {
       }
 
       restore_result <- tryCatch({
-        restore_auth_session(token)
+        auth_provider$restore_session(token)
       }, error = function(e) {
         app_log_exception("auth", "Session restore failed", e)
         list(success = FALSE, status = "invalid")
@@ -473,7 +638,7 @@ loginServer <- function(id) {
       }
 
       restore_result <- tryCatch({
-        restore_auth_session(token)
+        auth_provider$restore_session(token)
       }, error = function(e) {
         app_log_exception("auth", "Client token restore failed", e)
         list(success = FALSE, status = "invalid")

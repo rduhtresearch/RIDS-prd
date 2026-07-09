@@ -101,4 +101,5 @@ run_custom_activity_module_validation_tests <- function() {
   cat("\n", strrep("=", 60), "\n", sep = "")
   cat("PASSED: ", .passed, "    FAILED: ", .failed, "\n", sep = "")
   cat(strrep("=", 60), "\n", sep = "")
+  invisible(list(passed = .passed, failed = .failed))
 }
