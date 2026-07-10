@@ -88,9 +88,9 @@ run_contract_cost_source_of_truth_tests <- function() {
     )
   ")
 
-  dbWriteTable(
-    con,
-    "ict_costing_tbl",
+	  dbWriteTable(
+	    con,
+	    "ict_costing_tbl",
     tibble(
       CPMS_ID = c("CP1", "CP1", "CP1", "CP1"),
       study_site = c("RDUHT", "RDUHT", "NDDHT", "RDUHT"),
@@ -125,8 +125,20 @@ run_contract_cost_source_of_truth_tests <- function() {
       activity_occurrence_id = c("ARM-A-1", "SSP-1"),
       staff_group = c(1L, 2L)
     ),
-    append = TRUE
-  )
+	    append = TRUE
+	  )
+
+  dbExecute(con, "ALTER TABLE ict_costing_tbl ADD COLUMN Arm_Identity VARCHAR")
+  dbExecute(con, "UPDATE ict_costing_tbl SET Arm_Identity = Study_Arm")
+  dbExecute(con, "
+    INSERT INTO ict_costing_tbl (
+      CPMS_ID, study_site, scenario_id, Study, Visit_Number, Study_Arm, Visit_Label,
+      Activity_Name, ICT_Cost, Contract_Cost, activity_occurrence_id, staff_group,
+      Arm_Identity
+    ) VALUES
+      ('CP1', 'RDUHT', 'A', 'Study A', 'VISIT - 001', 'UA', 'Unscheduled', 'Extra Bloods', 10, 111, 'UA-A-1', 1, 'Arm A'),
+      ('CP1', 'RDUHT', 'A', 'Study A', 'VISIT - 001', 'UA', 'Unscheduled', 'Extra Bloods', 20, 222, 'UA-B-1', 1, 'Arm B')
+  ")
 
   cat("[ join_ict_costs ]\n")
   joined_activity <- join_ict_costs(
@@ -190,8 +202,24 @@ run_contract_cost_source_of_truth_tests <- function() {
     ),
     db_path
   )
-  .expect("same CPMS and site joins to the active scenario only",
-          identical(joined_other_scenario$contract_cost[[1]], 444.44))
+	  .expect("same CPMS and site joins to the active scenario only",
+	          identical(joined_other_scenario$contract_cost[[1]], 444.44))
+
+  joined_ua_arm <- join_ict_costs(
+    tibble(
+      cpms_id = "CP1",
+      study_site = "RDUHT",
+      scenario_id = "A",
+      Visit = "VISIT - 001",
+      Study_Arm = "UA",
+      Arm_Identity = "Arm B",
+      Activity = "Extra Bloods",
+      staff_group = 1L
+    ),
+    db_path
+  )
+  .expect("UA contract cost join uses Arm_Identity rather than generic Study_Arm",
+          identical(joined_ua_arm$contract_cost[[1]], 222))
 
   cat("\n[ persist_ict_to_duckdb ]\n")
   scoped_db_path <- tempfile(fileext = ".duckdb")
@@ -401,17 +429,46 @@ run_contract_cost_source_of_truth_tests <- function() {
     ),
     edge_id = "EDGE-PROJ-1"
   )
-  .expect("scheduled main visits are renumbered densely before SSP rows",
-          identical(
-            renumber_template[["Treatment Arm"]]$`Cost Item Description`,
-            c(
-              "VISIT - 001 - Screening",
-              "VISIT - 002 - Week 12",
-              "VISIT - 003 - Week 48",
-              "VISIT - 004 - Week 4 - Questionnaire",
-              "VISIT - 005 - Week 8 - ECG"
-            )
-          ))
+	  .expect("scheduled main visits are renumbered densely before SSP rows",
+	          identical(
+	            renumber_template[["Treatment Arm"]]$`Cost Item Description`,
+	            c(
+	              "VISIT - 001 - Screening",
+	              "VISIT - 002 - Week 12",
+	              "VISIT - 003 - Week 48",
+	              "[SSP] VISIT - 002 - Week 4 - Questionnaire",
+	              "[SSP] VISIT - 003 - Week 8 - ECG"
+	            )
+	          ))
+
+  ua_templates <- build_all_edge_templates(
+    tibble(
+      row_id = c(1L, 2L),
+      scenario_id = c("A", "A"),
+      sheet_name = c("Unscheduled Activities", "Unscheduled Activities"),
+      Study_Arm = c("UA", "UA"),
+      Arm_Identity = c("Arm A", "Arm B"),
+      Activity = c("Extra Bloods", "Extra Bloods"),
+      staff_group = c(1L, 1L),
+      edge_key = c("EDGE-UA-A", "EDGE-UA-B"),
+      Department = c("Pathology", "Pathology"),
+      Staff_Role = c("Nurse", "Medic"),
+      adjusted_amount = c(111, 222),
+      study_name = c("Study A", "Study A"),
+      cpms_id = c("CP1", "CP1")
+    ),
+    visit_lookup = tibble(
+      Study = "Study A",
+      Study_Arm = "Arm A",
+      Visit_Label = "Screening",
+      Visit_Number = "VISIT - 001"
+    ),
+    edge_id = "EDGE-PROJ-1"
+  )
+  .expect("UA templates are split by Arm_Identity",
+          all(c("UA - Arm A", "UA - Arm B") %in% names(ua_templates)))
+  .expect("UA template descriptions include Staff_Role",
+          identical(ua_templates[["UA - Arm B"]]$`Cost Item Description`, "Extra Bloods - Medic"))
 
   cat("\n[ screening failure duplication ]\n")
   screening_input <- tibble(
@@ -640,18 +697,18 @@ run_contract_cost_source_of_truth_tests <- function() {
           ))
   .expect("screening templates are itemised per duplicated source row",
           identical(
-            screening_templates[["Arm A - SCREENING FAILURE"]]$`Cost Item Description`,
-            c(
-              "VISIT - 001 - Screening - Informed consent",
-              "VISIT - 001 - Screening - Informed consent",
-              "VISIT - 001 - Screening - Demographics"
-            )
-          ))
+	            screening_templates[["Arm A - SCREENING FAILURE"]]$`Cost Item Description`,
+	            c(
+	              "VISIT - 001 - Screening - Informed consent - Nurse",
+	              "VISIT - 001 - Screening - Informed consent - Nurse",
+	              "VISIT - 001 - Screening - Demographics - Nurse"
+	            )
+	          ))
   .expect("repeated screening source rows remain separate in the template",
-          sum(
-            screening_templates[["Arm A - SCREENING FAILURE"]]$`Cost Item Description` ==
-              "VISIT - 001 - Screening - Informed consent"
-          ) == 2L)
+	          sum(
+	            screening_templates[["Arm A - SCREENING FAILURE"]]$`Cost Item Description` ==
+	              "VISIT - 001 - Screening - Informed consent - Nurse"
+	          ) == 2L)
   .expect("screening failure rows get distinct itemised EDGE keys",
           dplyr::n_distinct(
             screening_keyed$edge_key[screening_keyed$sheet_name == "Arm A - SCREENING FAILURE"]

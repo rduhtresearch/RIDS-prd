@@ -10,6 +10,10 @@
 services:
   app:
     build: .
+    # Apple Silicon can fall back to slow/unreliable source builds for some R
+    # packages (notably duckdb). Run the app image as amd64 so the Docker path
+    # uses the more stable package ecosystem this image expects.
+    platform: linux/amd64
     ports:
       - "${RIDS_APP_PORT:-3838}:3838"
     environment:

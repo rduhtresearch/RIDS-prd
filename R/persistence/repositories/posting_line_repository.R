@@ -1,6 +1,25 @@
 # posting_lines repository. All SQL for the posting_lines table lives here.
 
 posting_line_repository <- function(con) {
+  has_arm_identity <- function() {
+    "arm_identity" %in% tolower(DBI::dbListFields(con, "posting_lines"))
+  }
+
+  prepare_posting_lines <- function(df) {
+    fields <- tolower(DBI::dbListFields(con, "posting_lines"))
+    table_has_arm_identity <- has_arm_identity()
+    if (table_has_arm_identity && !"Arm_Identity" %in% names(df)) {
+      df$Arm_Identity <- df$Study_Arm
+    }
+    if (!table_has_arm_identity && "Arm_Identity" %in% names(df)) {
+      df$Arm_Identity <- NULL
+    }
+    if (!"activity_occurrence_id" %in% fields && "activity_occurrence_id" %in% names(df)) {
+      df$activity_occurrence_id <- NULL
+    }
+    df
+  }
+
   list(
     count_for_run = function(cpms_id, study_site, scenario_id) {
       rids_dbGetQuery(
@@ -27,6 +46,7 @@ posting_line_repository <- function(con) {
     # Atomic replace of one run's posting lines (step 4 persist).
     replace_for_run = function(df, cpms_id, study_site, scenario_id) {
       DBI::dbWithTransaction(con, {
+        df <- prepare_posting_lines(df)
         rids_dbExecute(
           con,
           paste(

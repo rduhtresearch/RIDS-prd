@@ -46,6 +46,7 @@ suppressPackageStartupMessages({
 })
 
 source("R/persistence/connection.R", local = FALSE)
+source("R/persistence/db_helpers.R", local = FALSE)
 source("R/persistence/repositories/rules_repository.R", local = FALSE)
 source("R/persistence/repositories/ict_costing_repository.R", local = FALSE)
 
@@ -150,6 +151,18 @@ read_ict_workbook <- function(ict) {
             "This means the input may not have come from the corrected pipeline.")
     df$Study_Arm <- df$sheet_name
   }
+  if (!"Arm_Identity" %in% names(df)) {
+    warning("read_ict_workbook(): 'Arm_Identity' column missing -- defaulting to Study_Arm. ",
+            "Multi-arm unscheduled rows may not join correctly.")
+    source_sheet <- if ("SheetName" %in% names(df)) {
+      df$SheetName
+    } else if ("sheet_name" %in% names(df)) {
+      df$sheet_name
+    } else {
+      df$Study_Arm
+    }
+    df$Arm_Identity <- ifelse(df$Study_Arm == "UA", source_sheet, df$Study_Arm)
+  }
   if (!"Visit_Label" %in% names(df)) {
     warning("read_ict_workbook(): 'Visit_Label' column missing -- defaulting to Visit. ",
             "The old overloaded Visit_Name may cause incorrect joins downstream.")
@@ -206,6 +219,10 @@ normalise_rows <- function(df, scenario_id, ruleset_id) {
 
 #' Load dist_rules, amount_map, and routing_rules from the finance rules DB.
 load_rules <- function(db_path, ruleset_id) {
+  if (identical(get0("STORAGE_MODE", ifnotfound = "duckdb"), "postgres")) {
+    return(rids_repos()$rules$ruleset_bundle(ruleset_id))
+  }
+
   if (!file.exists(db_path)) stop("load_rules(): DB not found: ", db_path)
   
   with_read_connection(db_path, function(con) {
@@ -239,19 +256,22 @@ load_rules <- function(db_path, ruleset_id) {
 #' @param db_path  Path to the DuckDB containing ict_costing_tbl.
 #' @return df with `contract_cost` column attached from saved Step 2 values.
 join_ict_costs <- function(df, db_path) {
-  if (!file.exists(db_path)) {
+  if (identical(get0("STORAGE_MODE", ifnotfound = "duckdb"), "postgres")) {
+    repo <- rids_repos()$ict_costing
+    ict <- if (repo$exists_table()) repo$all_contract_costs() else NULL
+  } else if (!file.exists(db_path)) {
     warning("join_ict_costs(): DB not found: ", db_path, " -- skipping contract cost join.")
     df$contract_cost <- NA_real_
     return(df)
+  } else {
+    ict <- with_read_connection(db_path, function(con) {
+      repo <- ict_costing_repository(con)
+      if (!repo$exists_table()) {
+        return(NULL)
+      }
+      repo$all_contract_costs()
+    })
   }
-  
-  ict <- with_read_connection(db_path, function(con) {
-    repo <- ict_costing_repository(con)
-    if (!repo$exists_table()) {
-      return(NULL)
-    }
-    repo$all_contract_costs()
-  })
 
   if (is.null(ict)) {
     warning("join_ict_costs(): ict_costing_tbl not found in DB -- skipping.")
@@ -263,7 +283,17 @@ join_ict_costs <- function(df, db_path) {
   # staff_group is the disambiguator: same activity at the same visit with
   # different staff/costs gets a unique staff_group in pipeline_fixed.r.
   # Including it in the join key gives a clean 1:1 match.
-  ict_activity <- ict %>% filter(!is.na(Activity_Name))
+  if (!"Arm_Identity" %in% names(df)) {
+    df$Arm_Identity <- df$Study_Arm
+  }
+  if (!"Arm_Identity" %in% names(ict)) {
+    ict$Arm_Identity <- ict$Study_Arm
+  }
+
+  ict_activity <- ict %>%
+    filter(!is.na(Activity_Name)) %>%
+    select(CPMS_ID, study_site, scenario_id, Visit_Number, Arm_Identity,
+           Activity_Name, staff_group, Contract_Cost)
   
   df <- df %>%
     left_join(
@@ -272,7 +302,7 @@ join_ict_costs <- function(df, db_path) {
              "study_site"  = "study_site",
              "scenario_id" = "scenario_id",
              "Visit"       = "Visit_Number",
-             "Study_Arm"   = "Study_Arm",
+             "Arm_Identity" = "Arm_Identity",
              "Activity"    = "Activity_Name",
              "staff_group" = "staff_group")
     )
@@ -281,7 +311,7 @@ join_ict_costs <- function(df, db_path) {
   # MFF rows don't have activity_occurrence_id, so join on visit-level key only.
   ict_visit <- ict %>%
     filter(is.na(Activity_Name)) %>%
-    select(CPMS_ID, study_site, scenario_id, Visit_Number, Study_Arm, Contract_Cost) %>%
+    select(CPMS_ID, study_site, scenario_id, Visit_Number, Arm_Identity, Contract_Cost) %>%
     rename(contract_cost_visit = Contract_Cost)
   
   df <- df %>%
@@ -291,7 +321,7 @@ join_ict_costs <- function(df, db_path) {
              "study_site" = "study_site",
              "scenario_id" = "scenario_id",
              "Visit"     = "Visit_Number",
-             "Study_Arm" = "Study_Arm")
+             "Arm_Identity" = "Arm_Identity")
     )
   
   # ── Coalesce: prefer activity-level, fall back to visit-level ──────────────
@@ -317,7 +347,7 @@ apply_dist_rules <- function(df, dist_rules, scenario_id,
   # Columns to carry through — intersect so missing optional cols don't error
   carry_cols <- intersect(
     names(df),
-    c("sheet_name", "Study_Arm", "Visit", "Activity", "cpms_id", "study_name",
+    c("sheet_name", "Study_Arm", "Arm_Identity", "Visit", "Activity", "cpms_id", "study_name",
       "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
       "is_medic", "Visit_Label", "activity_occurrence_id", "staff_group",
       "provider_org", "pi_org", "Activity.Cost", "contract_cost", "Department",
@@ -507,7 +537,7 @@ select_output_cols <- function(posting_plan) {
     select(all_of(c(
       core,
       intersect(
-        c("sheet_name", "Visit_Label", "activity_occurrence_id", "staff_group",
+        c("sheet_name", "Arm_Identity", "Visit_Label", "activity_occurrence_id", "staff_group",
           "contract_cost", "Department", "Staff.Role", "activity_type",
           "time_required"),
         names(.)

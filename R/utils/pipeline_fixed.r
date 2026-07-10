@@ -229,12 +229,6 @@ build_ua_ssp_lookup_from_sheet <- function(df, study_value, cpms_id, visit_label
 }
 
 persist_ict_to_duckdb <- function(db_path, ict_cost_table) {
-  require_pkg("DBI")
-  require_pkg("duckdb")
-
-  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path)
-  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
-
   ict_cost_table$Contract_Cost <- NA_real_
 
   # Reorder columns to match table schema exactly
@@ -243,7 +237,19 @@ persist_ict_to_duckdb <- function(db_path, ict_cost_table) {
     "Activity_Name", "ICT_Cost", "Contract_Cost", "activity_occurrence_id", "staff_group"
   )]
 
+  if (identical(get0("STORAGE_MODE", ifnotfound = "duckdb"), "postgres")) {
+    rids_repos()$ict_costing$replace_from_staging(ict_cost_table)
+    return(invisible(TRUE))
+  }
+
+  require_pkg("DBI")
+  require_pkg("duckdb")
+
+  con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path)
+  on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
   ict_costing_repository(con)$replace_from_staging(ict_cost_table)
+  invisible(TRUE)
 }
 
 # ── Stage A ───────────────────────────────────────────────────────────────────

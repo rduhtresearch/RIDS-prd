@@ -93,6 +93,45 @@ step3_Server <- function(id, auth_state, shared_state, current_step) {
       # render table
       output$table <- renderReactable({
         req(working_data$df)
+
+        column_defs <- list(
+          .selection               = colDef(name = "Select", sortable = FALSE, filterable = FALSE, width = 50, align = "center", headerStyle = list(fontWeight = "bold"), header = JS("function() { return '' }")),
+          Visit                    = colDef(show = TRUE),
+          Activity                 = colDef(show = TRUE),
+          Activity.Type            = colDef(name = "Type", show = TRUE),
+          Department               = colDef(show = TRUE),
+          calc_tag                 = colDef(name = "Tag", show = TRUE),
+          Activity.Code            = colDef(show = FALSE),
+          Staff.Role               = colDef(show = FALSE),
+          Time.Required            = colDef(show = FALSE),
+          Activity.Cost            = colDef(show = FALSE),
+          Total.Activity.Cost      = colDef(show = FALSE),
+          Indirect.Costs           = colDef(show = FALSE),
+          Capacity.Building        = colDef(show = FALSE),
+          MFF                      = colDef(show = FALSE),
+          Total                    = colDef(show = FALSE),
+          study_name               = colDef(show = FALSE),
+          cpms_id                  = colDef(show = FALSE),
+          Flag                     = colDef(show = FALSE),
+          SheetName                = colDef(show = FALSE),
+          staff_group              = colDef(show = FALSE),
+          Study_Arm                = colDef(show = FALSE),
+          activity_occurrence_id.x = colDef(show = FALSE),
+          sheet_name               = colDef(show = FALSE),
+          row_id                   = colDef(show = FALSE),
+          provider_org             = colDef(show = FALSE),
+          pi_org                   = colDef(show = FALSE),
+          Visit_Label              = colDef(show = FALSE),
+          activity_type_norm       = colDef(show = FALSE),
+          staff_role_norm          = colDef(show = FALSE),
+          row_category_auto        = colDef(show = FALSE),
+          row_category             = colDef(show = FALSE),
+          is_medic                 = colDef(show = FALSE),
+          scenario_id              = colDef(show = FALSE),
+          ruleset_id               = colDef(show = FALSE),
+          activity_occurrence_id.y = colDef(show = FALSE),
+          contract_cost            = colDef(show = FALSE)
+        )
         
         reactable(
           working_data$df,
@@ -107,44 +146,7 @@ step3_Server <- function(id, auth_state, shared_state, current_step) {
       return { background: '#e8f4fd' }
     }
   }"),
-          columns = list(
-            .selection               = colDef(name = "Select", sortable = FALSE, filterable = FALSE, width = 50, align = "center", headerStyle = list(fontWeight = "bold"), header = JS("function() { return '' }")),
-            Visit                    = colDef(show = TRUE),
-            Activity                 = colDef(show = TRUE),
-            Activity.Type            = colDef(name = "Type", show = TRUE),
-            Department               = colDef(show = TRUE),
-            calc_tag                 = colDef(name = "Tag", show = TRUE),
-            Activity.Code            = colDef(show = FALSE),
-            Staff.Role               = colDef(show = FALSE),
-            Time.Required            = colDef(show = FALSE),
-            Activity.Cost            = colDef(show = FALSE),
-            Total.Activity.Cost      = colDef(show = FALSE),
-            Indirect.Costs           = colDef(show = FALSE),
-            Capacity.Building        = colDef(show = FALSE),
-            MFF                      = colDef(show = FALSE),
-            Total                    = colDef(show = FALSE),
-            study_name               = colDef(show = FALSE),
-            cpms_id                  = colDef(show = FALSE),
-            Flag                     = colDef(show = FALSE),
-            SheetName                = colDef(show = FALSE),
-            staff_group              = colDef(show = FALSE),
-            Study_Arm                = colDef(show = FALSE),
-            activity_occurrence_id.x = colDef(show = FALSE),
-            sheet_name               = colDef(show = FALSE),
-            row_id                   = colDef(show = FALSE),
-            provider_org             = colDef(show = FALSE),
-            pi_org                   = colDef(show = FALSE),
-            Visit_Label              = colDef(show = FALSE),
-            activity_type_norm       = colDef(show = FALSE),
-            staff_role_norm          = colDef(show = FALSE),
-            row_category_auto        = colDef(show = FALSE),
-            row_category             = colDef(show = FALSE),
-            is_medic                 = colDef(show = FALSE),
-            scenario_id              = colDef(show = FALSE),
-            ruleset_id               = colDef(show = FALSE),
-            activity_occurrence_id.y = colDef(show = FALSE),
-            contract_cost            = colDef(show = FALSE)
-          )
+          columns = column_defs[intersect(names(column_defs), c(".selection", names(working_data$df)))]
         )
       })
       
