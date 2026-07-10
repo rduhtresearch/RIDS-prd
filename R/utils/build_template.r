@@ -321,6 +321,16 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
       visit_label_lookup = dplyr::first(Visit_Label),
       .by = c(Study, Visit_Number)
     )
+
+  if (!"Arm_Identity" %in% names(data)) {
+    data$Arm_Identity <- data$Study_Arm
+  }
+  if (!"Staff.Role" %in% names(data) && "Staff_Role" %in% names(data)) {
+    data[["Staff.Role"]] <- data[["Staff_Role"]]
+  }
+  if (!"Staff.Role" %in% names(data)) {
+    data[["Staff.Role"]] <- NA_character_
+  }
   
   # ── Build templates ───────────────────────────────────────────────────────────
 
@@ -329,21 +339,48 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
     # rest of the export pipeline continues to reconcile on adjusted totals.
     total * 0
   }
+
+  resolve_special_template_name <- function(sheet_name, arm_identity = NULL) {
+    sheet_name <- str_squish(as.character(sheet_name))
+    arm_identity <- if (is.null(arm_identity)) NA_character_ else str_squish(as.character(arm_identity))
+
+    dplyr::if_else(
+      sheet_name == "Unscheduled Activities",
+      paste0("UA - ", coalesce(arm_identity, sheet_name)),
+      sheet_name
+    )
+  }
+
+  resolve_itemised_default_cost <- function(sheet_name, total) {
+    if_else(is_screening_failure_sheet(sheet_name), screening_failure_default_cost(total), total)
+  }
+
+  prefix_ssp_description <- function(description, Study_Arm) {
+    if_else(Study_Arm == "SSP", paste0("[SSP] ", description), description)
+  }
+
+  append_staff_role_description <- function(description, staff_role) {
+    staff_role <- str_squish(as.character(staff_role))
+    if_else(!is.na(staff_role) & staff_role != "", paste0(description, " - ", staff_role), description)
+  }
   
   .build_special <- function(df) {
     df |>
       summarise(
         total = sum(adjusted_amount, na.rm = TRUE),
-        .by   = c(Study_Arm, sheet_name, Activity, row_id, 
-                  staff_group, edge_key, Department, study_name, cpms_id)
+        .by   = c(Study_Arm, Arm_Identity, template_name, sheet_name, Activity, row_id,
+                  staff_group, edge_key, Department, `Staff.Role`, study_name, cpms_id)
       ) |>
       mutate(
         `EDGE Project ID`                                      = edge_id,
-        `Template Name`                                        = sheet_name,
+        `Template Name`                                        = template_name,
         `Template Level (Project | Participant | ProjectSite)` = NA,
-        `Project Arm (Participant only)`                       = sheet_name,
+        `Project Arm (Participant only)`                       = template_name,
         `Project Site Name (ProjectSite only)`                 = NA,
-        `Cost Item Description`                                = str_replace_all(Activity, "\\.", " "),
+        `Cost Item Description`                                = append_staff_role_description(
+          str_replace_all(Activity, "\\.", " "),
+          `Staff.Role`
+        ),
         `Analysis Code`                                        = edge_key,
         `Cost Category`                                        = "Research Cost",
         `Default Cost`                                         = total,
@@ -360,7 +397,8 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
     df |>
       summarise(
         total = sum(adjusted_amount, na.rm = TRUE),
-        .by   = c(sheet_name, Visit, Visit_Label, Activity, row_id, staff_group, edge_key, study_name, cpms_id)
+        .by   = c(sheet_name, Study_Arm, Visit, Visit_Label, Activity, row_id,
+                  staff_group, edge_key, `Staff.Role`, study_name, cpms_id)
       ) |>
       left_join(
         visit_labels_lookup,
@@ -374,10 +412,16 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
         `Template Level (Project | Participant | ProjectSite)` = NA,
         `Project Arm (Participant only)`                       = sheet_name,
         `Project Site Name (ProjectSite only)`                 = NA,
-        `Cost Item Description`                                = paste0(
-          format_visit_prefix(Visit, Visit_Label),
-          " - ",
-          str_replace_all(Activity, "\\.", " ")
+        `Cost Item Description`                                = prefix_ssp_description(
+          append_staff_role_description(
+            paste0(
+              format_visit_prefix(Visit, Visit_Label),
+              " - ",
+              str_replace_all(Activity, "\\.", " ")
+            ),
+            `Staff.Role`
+          ),
+          Study_Arm
         ),
         `Analysis Code`                                        = edge_key,
         `Cost Category`                                        = "Research Cost",
@@ -448,29 +492,12 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
       mutate(display_visit = paste0("VISIT - ", str_pad(row_number(), 3, pad = "0"))) |>
       select(Visit, row_type, display_visit)
 
-    itemised_visit_sequence <- itemised_rows |>
-      distinct(Visit) |>
-      mutate(
-        row_type = "itemised",
-        visit_sort = visit_sort_key(Visit)
-      ) |>
-      arrange(visit_sort, Visit) |>
-      mutate(
-        display_visit = paste0(
-          "VISIT - ",
-          str_pad(row_number() + nrow(scheduled_visit_sequence), 3, pad = "0")
-        )
-      ) |>
-      select(Visit, row_type, display_visit)
-
     itemised_built <- if (nrow(itemised_rows) > 0) {
       itemised_rows |>
         summarise(
           total = sum(adjusted_amount, na.rm = TRUE),
-          .by   = c(study_name, Visit, Study_Arm, Visit_Label, Activity, row_id, staff_group, edge_key)
+          .by   = c(study_name, sheet_name, Visit, Study_Arm, Visit_Label, Activity, row_id, staff_group, edge_key)
         ) |>
-        mutate(row_type = "itemised") |>
-        left_join(itemised_visit_sequence, by = c("Visit", "row_type")) |>
         left_join(
           visit_labels_lookup,
           by = c("study_name" = "Study", "Visit" = "Visit_Number")
@@ -479,23 +506,25 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
         mutate(
           Visit_Label = resolve_visit_label(Visit, Visit_Label, visit_label_lookup),
           item_text = str_replace_all(Activity, "\\.", " "),
-          visit_prefix = format_visit_prefix(display_visit, Visit_Label),
+          visit_prefix = format_visit_prefix(Visit, Visit_Label),
           `EDGE Project ID`                                      = edge_id,
           `Template Name`                                        = template_name,
           `Template Level (Project | Participant | ProjectSite)` = NA,
           `Project Arm (Participant only)`                       = NA,
           `Project Site Name (ProjectSite only)`                 = NA,
-          `Cost Item Description`                                = paste0(visit_prefix, " - ", item_text),
+          `Cost Item Description`                                = prefix_ssp_description(
+            paste0(visit_prefix, " - ", item_text),
+            Study_Arm
+          ),
           `Analysis Code`                                        = edge_key,
           `Cost Category`                                        = "Research Cost",
-          `Default Cost`                                         = screening_failure_default_cost(total),
+          `Default Cost`                                         = resolve_itemised_default_cost(sheet_name, total),
           `Currency`                                             = "GBP",
           `Department`                                           = NA,
           `Overhead Cost`                                        = NA,
           `Time`                                                 = NA,
           `Activity Type`                                        = NA
         ) |>
-        select(-row_type) |>
         select(-visit_label_lookup) |>
         select(all_of(.EDGE_COLS))
     } else {
@@ -549,7 +578,9 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
   
   # ── Dispatch and return ───────────────────────────────────────────────────────
   
-  special_data <- data |> filter(sheet_name %in% .SPECIAL_SHEETS)
+  special_data <- data |>
+    filter(sheet_name %in% .SPECIAL_SHEETS) |>
+    mutate(template_name = resolve_special_template_name(sheet_name, Arm_Identity))
   screening_data <- data |> filter(is_screening_failure_sheet(sheet_name))
   
   # Main data = everything that isn't a "special sheet" AND isn't custom,
@@ -569,9 +600,9 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
   
   special_list <- if (nrow(special_data) > 0) {
     special_data |>
-      group_by(sheet_name) |>
+      group_by(template_name) |>
       group_map(~ .build_special(.x), .keep = TRUE) |>
-      setNames(sort(unique(special_data$sheet_name)))
+      setNames(sort(unique(special_data$template_name)))
   } else {
     list()
   }

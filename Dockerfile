@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN Rscript -e "\
-  options(repos = c(CRAN = sprintf('https://packagemanager.posit.co/cran/__linux__/jammy/%s', '${RIDS_CRAN_SNAPSHOT}')), timeout = 600); \
+  options(repos = c(CRAN = sprintf('https://packagemanager.posit.co/cran/__linux__/noble/%s', '${RIDS_CRAN_SNAPSHOT}')), timeout = 600); \
   install.packages(c( \
     'DBI', 'duckdb', 'RPostgres', 'sodium', 'digest', \
     'shiny', 'bs4Dash', 'waiter', 'shinyFeedback', 'shinyjs', \

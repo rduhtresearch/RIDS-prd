@@ -59,12 +59,37 @@ run_edge_builder_module_tests <- function() {
     `Main Arm` = main_tpl,
     `Setup & Closedown` = setup_tpl
   )
-  movable <- edge_builder_compute_movable(tpls)
+  movable <- names(tpls)
 
-  .expect("Setup & Closedown is movable with departmental rows after trimming",
-          identical(movable, "Setup & Closedown"))
-  .expect("Main Arm stays read-only when Department is blank/NA only",
-          !("Main Arm" %in% movable))
+  .expect("all generated templates are movable",
+          identical(movable, c("Main Arm", "Setup & Closedown")))
+  .expect("Main Arm can now be a move source even when Department is blank/NA only",
+          edge_builder_can_move_from("Main Arm", movable))
+
+  cat("\n[ template sections and edited state ]\n")
+  edited_tpls <- tpls
+  edited_tpls$`Main Arm` <- edited_tpls$`Main Arm`[-1, , drop = FALSE]
+  edited_tpls$`Safety Follow-up` <- setup_tpl[0, , drop = FALSE]
+  .expect("main templates are grouped as study arm templates",
+          identical(edge_builder_template_section("Main Arm"), "Main Arms"))
+  .expect("UA templates are grouped as unscheduled templates",
+          identical(edge_builder_template_section("UA - Arm A"), "Unscheduled"))
+  .expect("Setup & Closedown is grouped as set-up",
+          identical(edge_builder_template_section("Setup & Closedown"), "Set-up"))
+  .expect("screening templates are grouped as screening failure",
+          identical(
+            edge_builder_template_section("Arm A - SCREENING FAILURE"),
+            "Screening Failure"
+          ))
+  .expect("new templates are grouped as custom templates",
+          identical(
+            edge_builder_template_section("Safety Follow-up", custom_templates = "Safety Follow-up"),
+            "Custom"
+          ))
+  .expect("changed original templates are marked edited",
+          edge_builder_template_is_edited("Main Arm", edited_tpls, tpls))
+  .expect("new custom templates are marked edited",
+          edge_builder_template_is_edited("Safety Follow-up", edited_tpls, tpls))
 
   cat("\n[ move target choices ]\n")
   only_new_choice <- edge_builder_move_target_choices(
@@ -72,10 +97,10 @@ run_edge_builder_module_tests <- function() {
     movable = movable,
     new_sentinel = new_sentinel
   )
-  .expect("single movable source still offers named tab creation",
-          identical(unname(only_new_choice), new_sentinel))
-  .expect("single movable source labels the choice as + New template...",
-          identical(names(only_new_choice), "+ New template..."))
+  .expect("existing targets are available alongside named tab creation",
+          identical(unname(only_new_choice), c("Main Arm", new_sentinel)))
+  .expect("existing target keeps its own label alongside new-template option",
+          identical(names(only_new_choice), c("Main Arm", "+ New template...")))
 
   multi_choices <- edge_builder_move_target_choices(
     active = "Setup & Closedown",
@@ -87,13 +112,13 @@ run_edge_builder_module_tests <- function() {
   .expect("existing target keeps its own label alongside new-template option",
           identical(names(multi_choices), c("Pharmacy", "+ New template...")))
 
-  readonly_choices <- edge_builder_move_target_choices(
+  main_choices <- edge_builder_move_target_choices(
     active = "Main Arm",
     movable = movable,
     new_sentinel = new_sentinel
   )
-  .expect("read-only source does not offer any move targets",
-          length(readonly_choices) == 0L)
+  .expect("main arm source offers move targets",
+          identical(unname(main_choices), c("Setup & Closedown", new_sentinel)))
 
   cat("\n[ new name validation ]\n")
   dup_check <- edge_builder_validate_new_name("Main Arm", names(tpls))

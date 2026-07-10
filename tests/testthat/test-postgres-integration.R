@@ -162,6 +162,30 @@ test_that("study/ict/posting round-trips keep canonical column names on postgres
   expect_false(repos$studies$exists_run("77001", "RDUHT", "A"))
 })
 
+test_that("stage A ICT persistence uses repositories in postgres mode", {
+  con <- pg_test_con()
+  repos <- build_repositories(con)
+
+  source_from_root("R/utils/pipeline_fixed.r")
+  assign("STORAGE_MODE", "postgres", envir = .GlobalEnv)
+
+  ict_df <- data.frame(
+    CPMS_ID = "88001", study_site = "RDUHT", scenario_id = "A",
+    Study = "PG Stage A", Visit_Number = "V1", Study_Arm = "Arm A",
+    Visit_Label = "Screening", Activity_Name = "Blood Test",
+    ICT_Cost = 100, activity_occurrence_id = 1L, staff_group = 1L,
+    stringsAsFactors = FALSE
+  )
+
+  expect_no_error(
+    persist_ict_to_duckdb("/definitely/not/a/duckdb/file.duckdb", ict_df)
+  )
+
+  fetched <- repos$ict_costing$find_by_run("88001", "RDUHT", "A")
+  expect_equal(nrow(fetched), 1)
+  expect_identical(fetched$Activity_Name[[1]], "Blood Test")
+})
+
 test_that("seed functions run cleanly on postgres", {
   con <- pg_test_con()
 

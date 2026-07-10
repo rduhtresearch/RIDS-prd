@@ -56,15 +56,15 @@ rids_dbExecute <- function(con, sql, params = NULL) {
 RIDS_CANONICAL_COLUMNS <- list(
   ict_costing_tbl = c(
     "CPMS_ID", "study_site", "scenario_id", "Study", "Visit_Number",
-    "Study_Arm", "Visit_Label", "Activity_Name", "ICT_Cost", "Contract_Cost",
-    "activity_occurrence_id", "staff_group"
+    "Study_Arm", "Arm_Identity", "Visit_Label", "Activity_Name", "ICT_Cost",
+    "Contract_Cost", "activity_occurrence_id", "staff_group"
   ),
   posting_lines = c(
     "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
     "is_medic", "cpms_id", "study_site", "study_name", "Study_Arm",
     "Activity", "Visit", "posting_line_type_id", "posting_amount",
     "destination_bucket", "destination_entity", "cost_code", "sheet_name",
-    "Visit_Label", "staff_group", "contract_cost", "Department",
+    "Arm_Identity", "Visit_Label", "activity_occurrence_id", "staff_group", "contract_cost", "Department",
     "Staff_Role", "activity_type", "time_required", "contract_price",
     "base_sum", "multiplier", "adjusted_amount", "residual",
     "is_residual_row", "adjusted_sum_check", "diff_check", "edge_key"
