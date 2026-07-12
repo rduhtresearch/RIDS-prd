@@ -248,7 +248,8 @@ customActivityServer <- function(id, auth_state, shared_state, study_arm_choices
       ca_load(
         cpms_id = as.character(shared_state$cpms_id),
         study_site = as.character(shared_state$study_site),
-        scenario_id = as.character(shared_state$scenario_id)
+        scenario_id = as.character(shared_state$scenario_id),
+        version_id = shared_state$template_version_id
       )
     })
     
@@ -263,7 +264,8 @@ customActivityServer <- function(id, auth_state, shared_state, study_arm_choices
         ca_clear_run(
           cpms_id = as.character(shared_state$cpms_id),
           study_site = as.character(shared_state$study_site %||% NA_character_),
-          scenario_id = as.character(shared_state$scenario_id %||% NA_character_)
+          scenario_id = as.character(shared_state$scenario_id %||% NA_character_),
+          version_id = shared_state$template_version_id
         )
         .bump()
       }
@@ -409,7 +411,13 @@ customActivityServer <- function(id, auth_state, shared_state, study_arm_choices
       if (!is.null(latest_clicked)) {
         # Perform the delete
         tryCatch({
-          ca_delete(latest_clicked)
+          ca_delete(
+            latest_clicked,
+            cpms_id = as.character(shared_state$cpms_id),
+            study_site = as.character(shared_state$study_site),
+            scenario_id = as.character(shared_state$scenario_id),
+            version_id = shared_state$template_version_id
+          )
           .bump()
           expanded_id(NULL)
           showNotification(paste0("Deleted ", latest_clicked),
@@ -672,6 +680,7 @@ customActivityServer <- function(id, auth_state, shared_state, study_arm_choices
         study_site  = as.character(shared_state$study_site %||% NA_character_),
         study_name  = as.character(shared_state$study_name  %||% NA_character_),
         scenario_id = as.character(shared_state$scenario_id %||% NA_character_),
+        version_id  = shared_state$template_version_id,
         Study_Arm   = input$modal_arm,
         Activity    = input$modal_activity,
         mode        = mode,

@@ -87,6 +87,10 @@ step2_contract_cost_values <- function(ict_cost, use_unrounded_cost = FALSE) {
   }
 }
 
+step2_uses_unrounded_cost <- function(value) {
+  isTRUE(value) || identical(as.character(value), "unrounded")
+}
+
 step2_initialize_contract_costs <- function(df, use_unrounded_cost = FALSE) {
   if (is.null(df) || !is.data.frame(df) || !("ICT_Cost" %in% names(df))) {
     return(df)
@@ -168,9 +172,12 @@ step2_apply_contract_override <- function(df, row_index, contract_cost) {
 
 step2_UI <- function(id) {
   ns <- NS(id)
-  tagList(
+  div(
+    class = "rids-page rids-workflow-page",
+    div(class = "rids-page-header rids-workflow-header", div(div(class = "rids-page-eyebrow", "ICT processing · Step 2 of 4"), h1("Review contract costs"), p("Check imported activities and confirm contract cost values.")), div(class = "rids-page-mark", icon("pound-sign"))),
+    uiOutput(ns("amendment_banner")),
     bs4Card(
-      title      = "Review Contract Costs",
+      title      = "Cost review",
       width      = 12,
       status     = "primary",
       solidHeader = FALSE,
@@ -178,72 +185,19 @@ step2_UI <- function(id) {
         div(
           class = "step2-rounding-wrap",
           span(class = "step2-rounding-title", "Contract cost mode"),
-          div(
-            class = "step2-rounding-toggle",
-            span(
-              id = ns("round_left_label"),
-              class = "step2-rounding-label is-active",
-              "Rounded"
-            ),
-            tags$label(
-              class = "step2-switch",
-              tags$input(
-                id = ns("round_to_pound_switch"),
-                type = "checkbox",
-                checked = "checked",
-                onclick = sprintf(
-                  "Shiny.setInputValue('%s', !this.checked, {priority: 'event'})",
-                  ns("use_unrounded_cost")
-                )
-              ),
-              tags$span(
-                class = "step2-switch-track",
-                tags$span(class = "step2-switch-knob")
-              )
-            ),
-            span(
-              id = ns("round_right_label"),
-              class = "step2-rounding-label",
-              "Unrounded"
-            )
-          ),
-          tags$script(HTML(sprintf("
-            (function() {
-              var cb = document.getElementById('%s');
-              var leftLbl = document.getElementById('%s');
-              var rightLbl = document.getElementById('%s');
-              function refresh() {
-                var knob = cb.parentNode.querySelector('.step2-switch-knob');
-                if (cb.checked) {
-                  knob.style.transform = 'translateX(0)';
-                  leftLbl.classList.add('is-active');
-                  rightLbl.classList.remove('is-active');
-                } else {
-                  knob.style.transform = 'translateX(24px)';
-                  leftLbl.classList.remove('is-active');
-                  rightLbl.classList.add('is-active');
-                }
-              }
-              cb.addEventListener('change', refresh);
-              refresh();
-            })();
-          ",
-            ns("round_to_pound_switch"),
-            ns("round_left_label"),
-            ns("round_right_label")
-          )))
+          radioButtons(
+            ns("use_unrounded_cost"),
+            label = NULL,
+            choices = c("Rounded" = "rounded", "Unrounded" = "unrounded"),
+            selected = "rounded",
+            inline = TRUE
+          )
         ),
         actionButton(ns("save"), "Save to database", class = "btn-success"),
         actionButton(ns("next_step"), "Next: Apply Tags", class = "pipeline-next-btn")
       ),
       div(
-        style = paste(
-          "display: flex;",
-          "gap: 0.75rem;",
-          "align-items: flex-end;",
-          "flex-wrap: wrap;",
-          "margin-bottom: 0.75rem;"
-        ),
+        class = "rids-filter-bar rids-inline-filters",
         selectInput(
           ns("study_arm_filter"),
           "Study Arm",
@@ -264,6 +218,11 @@ step2_UI <- function(id) {
           width = "260px"
         )
       ),
+      div(
+        class = "step2-table-hint",
+        icon("mouse-pointer"),
+        "Select any row to adjust its contract cost."
+      ),
       reactableOutput(ns("table"))
     )
   )
@@ -271,6 +230,8 @@ step2_UI <- function(id) {
 
 step2_Server <- function(id, auth_state, shared_state, current_step) {
   moduleServer(id, function(input, output, session) {
+    output$amendment_banner <- render_amendment_workflow_banner(shared_state)
+
           
     working_data <- reactiveValues(df = NULL)
     selected_row_index <- reactiveVal(NULL)
@@ -300,11 +261,6 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
       )
     })
 
-    refresh_table <- function() {
-      req(working_data$df)
-      updateReactable("table", data = visible_rows())
-    }
-
     reset_filters <- function() {
       req(working_data$df)
       updateSelectInput(
@@ -325,19 +281,25 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
     
     # ── Load data ─────────────────────────────────────────────────────────────
     observeEvent(
-      list(shared_state$cpms_id, shared_state$study_site, shared_state$scenario_id),
+      list(
+        shared_state$cpms_id,
+        shared_state$study_site,
+        shared_state$scenario_id,
+        shared_state$template_version_id
+      ),
       {
       req(shared_state$cpms_id, shared_state$study_site, shared_state$scenario_id)
 
       df <- rids_repos()$ict_costing$find_by_run(
         as.character(shared_state$cpms_id),
         as.character(shared_state$study_site),
-        as.character(shared_state$scenario_id)
+        as.character(shared_state$scenario_id),
+        shared_state$template_version_id
       )
       
       working_data$df <- step2_prepare_working_data(
         df,
-        use_unrounded_cost = isTRUE(isolate(input$use_unrounded_cost))
+        use_unrounded_cost = step2_uses_unrounded_cost(isolate(input$use_unrounded_cost))
       )
       reset_filters()
       is_saved(FALSE)
@@ -351,18 +313,16 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
         working_data$df,
         use_unrounded_cost = use_unrounded_cost
       )
-      refresh_table()
     }
 
     # ── Toggle rounding mode ──────────────────────────────────────────────────
     observeEvent(input$use_unrounded_cost, {
-      apply_contract_cost_mode(input$use_unrounded_cost)
+      apply_contract_cost_mode(step2_uses_unrounded_cost(input$use_unrounded_cost))
       is_saved(FALSE)
-    })
+    }, ignoreInit = TRUE)
 
     observeEvent(list(input$study_arm_filter, input$visit_filter, input$activity_search), {
       selected_row_index(NULL)
-      refresh_table()
     }, ignoreInit = TRUE)
     
     # ── Row select → modal ────────────────────────────────────────────────────
@@ -392,7 +352,21 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
         ),
         footer = tagList(
           modalButton("Cancel"),
-          actionButton(session$ns("confirm_edit"), "Confirm", class = "btn-primary")
+          actionButton(
+            session$ns("confirm_edit"),
+            "Confirm",
+            class = "btn-primary",
+            onclick = sprintf(
+              paste0(
+                "var field = document.getElementById('%s');",
+                "if (field && window.Shiny) {",
+                "Shiny.setInputValue('%s', Number(field.value), {priority: 'event'});",
+                "}"
+              ),
+              session$ns("contract_value"),
+              session$ns("contract_value")
+            )
+          )
         )
       ))
     })
@@ -409,7 +383,6 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
         contract_cost = input$contract_value
       )
       
-      refresh_table()
       is_saved(FALSE)
       removeModal()
     })
@@ -436,7 +409,8 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
           step2_strip_state_columns(working_data$df),
           as.character(shared_state$cpms_id),
           as.character(shared_state$study_site),
-          as.character(shared_state$scenario_id)
+          as.character(shared_state$scenario_id),
+          shared_state$template_version_id
         )
 
         log_event(

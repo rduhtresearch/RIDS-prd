@@ -1,24 +1,19 @@
 supportUI <- function(id) {
   ns <- NS(id)
   
-  tagList(
+  div(
+    class = "rids-page",
     div(
-      style = "padding: 1rem;",
-      h3(
-        style = "margin-bottom: 0.4rem; color: #1d2a36;",
-        "Support"
-      ),
-      p(
-        style = "color: #697786; margin-bottom: 1.5rem;",
-        "Need help, found a bug, or want to track what's already been raised? ",
-        "Use the options below."
-      ),
+      class = "rids-page-header",
+      div(div(class = "rids-page-eyebrow", "Help centre"), h1("Support"), p("Report an issue, suggest an improvement or follow existing work.")),
+      div(class = "rids-page-mark", icon("life-ring"))
+    ),
       
-      fluidRow(
+    fluidRow(
         column(
           width = 6,
           bs4Card(
-            title       = "Report an issue",
+            title       = tagList(icon("paper-plane"), " Report an issue"),
             width       = 12,
             status      = "primary",
             solidHeader = FALSE,
@@ -43,7 +38,7 @@ supportUI <- function(id) {
         column(
           width = 6,
           bs4Card(
-            title       = "Track issues",
+            title       = tagList(icon("list-check"), " Track issues"),
             width       = 12,
             status      = "primary",
             solidHeader = FALSE,
@@ -64,7 +59,6 @@ supportUI <- function(id) {
             )
           )
         )
-      )
     )
   )
 }

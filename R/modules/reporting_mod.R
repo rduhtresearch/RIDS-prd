@@ -1,17 +1,14 @@
 reportingUI <- function(id) {
   ns <- NS(id)
-  tagList(
-    fluidRow(
-      bs4Card(
-        title = "Reporting",
-        width = 12,
-        status = "primary",
-        solidHeader = FALSE,
-        div(
-          style = "padding: 1rem 0; color: #697786; font-size: 0.95rem;",
-          "This page will be available soon."
-        )
-      )
+  div(
+    class = "rids-page",
+    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Insights"), h1("Reporting"), p("Monitor study income and operational performance.")), div(class = "rids-page-mark", icon("chart-line"))),
+    div(
+      class = "rids-empty-state rids-surface",
+      div(class = "rids-empty-icon", icon("chart-bar")),
+      h2("Reporting is being prepared"),
+      p("This workspace will bring study and income reporting into one consistent view."),
+      span(class = "rids-status-chip", "Coming soon")
     )
   )
 }

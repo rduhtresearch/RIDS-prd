@@ -26,12 +26,15 @@ test_that("fresh database gets the full schema and versions are recorded", {
     "user_api_credentials", "rulesets", "provider_orgs", "posting_line_types",
     "dist_rules", "amount_map", "routing_rules", "app_settings", "app_logs",
     "specialities", "posting_lines", "addon_custom_activities",
-    "ref_custom_activities", "schema_migrations"
+    "ref_custom_activities", "template_versions", "schema_migrations"
   )
   expect_length(setdiff(expected, tables), 0)
   expect_true("arm_identity" %in% tolower(DBI::dbListFields(con, "ict_costing_tbl")))
   expect_true("arm_identity" %in% tolower(DBI::dbListFields(con, "posting_lines")))
   expect_true("activity_occurrence_id" %in% tolower(DBI::dbListFields(con, "posting_lines")))
+  expect_true("version_id" %in% tolower(DBI::dbListFields(con, "ict_costing_tbl")))
+  expect_true("version_id" %in% tolower(DBI::dbListFields(con, "posting_lines")))
+  expect_true("version_id" %in% tolower(DBI::dbListFields(con, "addon_custom_activities")))
 
   applied <- DBI::dbGetQuery(con, "SELECT version FROM schema_migrations ORDER BY version")$version
   expect_identical(applied, sort(ran))

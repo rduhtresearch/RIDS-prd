@@ -126,6 +126,7 @@ ca_insert <- function(activity, con = CON) {
     study_site         = as.character(activity$study_site),
     study_name         = as.character(activity$study_name %||% NA_character_),
     scenario_id        = as.character(activity$scenario_id %||% NA_character_),
+    version_id         = if (is.null(activity$version_id)) NA_integer_ else as.integer(activity$version_id),
     Study_Arm          = as.character(activity$Study_Arm),
     Activity           = as.character(activity$Activity),
     mode               = as.character(activity$mode),
@@ -135,6 +136,10 @@ ca_insert <- function(activity, con = CON) {
     created_by         = if (is.null(activity$created_by)) NA_integer_
     else as.integer(activity$created_by)
   )
+
+  if (!"version_id" %in% tolower(dbListFields(con, "addon_custom_activities"))) {
+    insert_df$version_id <- NULL
+  }
   
   # Transaction: either all slots land, or none do.
   dbWithTransaction(con, {
@@ -157,7 +162,7 @@ ca_insert <- function(activity, con = CON) {
 #' @param scenario_id  Character. The scenario ID.
 #' @param con          DBI connection.
 #' @return             Tibble. Empty if no custom activities exist for this run.
-ca_load <- function(cpms_id, study_site, scenario_id, con = CON) {
+ca_load <- function(cpms_id, study_site, scenario_id, con = CON, version_id = NULL) {
   
   if (!is.character(cpms_id) || length(cpms_id) != 1L ||
       is.na(cpms_id) || !nzchar(cpms_id)) {
@@ -172,18 +177,25 @@ ca_load <- function(cpms_id, study_site, scenario_id, con = CON) {
     stop("ca_load(): `scenario_id` must be a non-empty single string.")
   }
   
-  df <- rids_dbGetQuery(con, "
-    SELECT id, custom_activity_id, cpms_id, study_site, study_name, scenario_id,
-           Study_Arm, Activity, mode, slot_num, cost_centre, amount,
-           created_by, created_at
-    FROM addon_custom_activities
-    WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?
-    ORDER BY custom_activity_id, slot_num
-  ", params = list(
+  has_version_id <- "version_id" %in% tolower(dbListFields(con, "addon_custom_activities"))
+  version_select <- if (has_version_id) ", version_id" else ""
+  version_clause <- if (has_version_id && !is.null(version_id)) " AND version_id = ?" else ""
+  params <- list(
     as.character(cpms_id),
     as.character(study_site),
     as.character(scenario_id)
-  ))
+  )
+  if (nzchar(version_clause)) params <- c(params, list(as.integer(version_id)))
+
+  df <- rids_dbGetQuery(con, paste0("
+    SELECT id, custom_activity_id, cpms_id, study_site, study_name, scenario_id,
+           Study_Arm, Activity, mode, slot_num, cost_centre, amount,
+           created_by, created_at", version_select, "
+    FROM addon_custom_activities
+    WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?
+    ", version_clause, "
+    ORDER BY custom_activity_id, slot_num
+  "), params = params)
   
   as_tibble(rids_canonicalize_names(df, "addon_custom_activities"))
 }
@@ -197,18 +209,44 @@ ca_load <- function(cpms_id, study_site, scenario_id, con = CON) {
 #'
 #' @param custom_activity_id  Character. The id returned from ca_insert().
 #' @param con                 DBI connection.
+#' @param cpms_id             Optional study identity scope.
+#' @param study_site          Optional study identity scope.
+#' @param scenario_id         Optional study identity scope.
+#' @param version_id          Optional template version scope.
 #' @return                    Integer. Number of rows deleted.
-ca_delete <- function(custom_activity_id, con = CON) {
+ca_delete <- function(custom_activity_id, con = CON, cpms_id = NULL,
+                      study_site = NULL, scenario_id = NULL, version_id = NULL) {
   
   if (!is.character(custom_activity_id) || length(custom_activity_id) != 1L ||
       is.na(custom_activity_id) || !nzchar(custom_activity_id)) {
     stop("ca_delete(): `custom_activity_id` must be a non-empty single string.")
   }
   
-  rids_dbExecute(con, "
-    DELETE FROM addon_custom_activities
-    WHERE custom_activity_id = ?
-  ", params = list(as.character(custom_activity_id)))
+  clauses <- c("custom_activity_id = ?")
+  params <- list(as.character(custom_activity_id))
+  scopes <- list(
+    cpms_id = cpms_id,
+    study_site = study_site,
+    scenario_id = scenario_id
+  )
+  for (column in names(scopes)) {
+    value <- scopes[[column]]
+    if (!is.null(value)) {
+      clauses <- c(clauses, paste0(column, " = ?"))
+      params <- c(params, list(as.character(value)))
+    }
+  }
+  if (!is.null(version_id) &&
+      "version_id" %in% tolower(dbListFields(con, "addon_custom_activities"))) {
+    clauses <- c(clauses, "version_id = ?")
+    params <- c(params, list(as.integer(version_id)))
+  }
+
+  rids_dbExecute(
+    con,
+    paste("DELETE FROM addon_custom_activities WHERE", paste(clauses, collapse = " AND ")),
+    params = params
+  )
 }
 
 # ── Clear all for run ────────────────────────────────────────────────────────
@@ -223,7 +261,7 @@ ca_delete <- function(custom_activity_id, con = CON) {
 #' @param scenario_id  Character. The scenario ID.
 #' @param con          DBI connection.
 #' @return             Integer. Number of rows deleted.
-ca_clear_run <- function(cpms_id, study_site, scenario_id, con = CON) {
+ca_clear_run <- function(cpms_id, study_site, scenario_id, con = CON, version_id = NULL) {
   
   if (!is.character(cpms_id) || length(cpms_id) != 1L ||
       is.na(cpms_id) || !nzchar(cpms_id)) {
@@ -238,14 +276,19 @@ ca_clear_run <- function(cpms_id, study_site, scenario_id, con = CON) {
     stop("ca_clear_run(): `scenario_id` must be a non-empty single string.")
   }
   
-  rids_dbExecute(con, "
-    DELETE FROM addon_custom_activities
-    WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?
-  ", params = list(
+  has_version_id <- "version_id" %in% tolower(dbListFields(con, "addon_custom_activities"))
+  version_clause <- if (has_version_id && !is.null(version_id)) " AND version_id = ?" else ""
+  params <- list(
     as.character(cpms_id),
     as.character(study_site),
     as.character(scenario_id)
-  ))
+  )
+  if (nzchar(version_clause)) params <- c(params, list(as.integer(version_id)))
+
+  rids_dbExecute(con, paste0("
+    DELETE FROM addon_custom_activities
+    WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?
+  ", version_clause), params = params)
 }
 
 # Null-coalesce helper (kept local to the addon)

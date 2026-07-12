@@ -1,17 +1,22 @@
 step3_UI <- function(id) {
   ns <- NS(id)
-  bs4Card(
-    title  = "Apply Tags",
-    width  = 12,
-    status = "primary",
-    solidHeader = FALSE,
-    footer = tagList(
-      selectInput(ns("tag_select"), label = NULL, choices = c("TRAINING_FEE"), width = "200px"),
-      actionButton(ns("apply_tag"), "Apply Tag", class = "btn-primary"),
-      actionButton(ns("save"), "Save", class = "btn-success"),
-      actionButton(ns("next_step"), "Next: Generate Templates", class = "pipeline-next-btn")
-    ),
-    reactableOutput(ns("table"))
+  div(
+    class = "rids-page rids-workflow-page",
+    div(class = "rids-page-header rids-workflow-header", div(div(class = "rids-page-eyebrow", "ICT processing · Step 3 of 4"), h1("Apply tags"), p("Classify posting lines before generating outputs.")), div(class = "rids-page-mark", icon("tags"))),
+    uiOutput(ns("amendment_banner")),
+    bs4Card(
+      title  = "Posting line tags",
+      width  = 12,
+      status = "primary",
+      solidHeader = FALSE,
+      footer = tagList(
+        selectInput(ns("tag_select"), label = NULL, choices = c("TRAINING_FEE"), width = "200px"),
+        actionButton(ns("apply_tag"), "Apply Tag", class = "btn-primary"),
+        actionButton(ns("save"), "Save", class = "btn-success"),
+        actionButton(ns("next_step"), "Next: Generate Templates", class = "pipeline-next-btn")
+      ),
+      reactableOutput(ns("table"))
+    )
   )
 }
 
@@ -19,6 +24,8 @@ step3_Server <- function(id, auth_state, shared_state, current_step) {
   moduleServer(
     id,
     function(input, output, session) {
+      output$amendment_banner <- render_amendment_workflow_banner(shared_state)
+
       
       w <- Waiter$new(
         html = build_loading_state_overlay("Running cost adjustment engine"),

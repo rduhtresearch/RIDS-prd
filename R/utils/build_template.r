@@ -368,7 +368,7 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
     df |>
       summarise(
         total = sum(adjusted_amount, na.rm = TRUE),
-        .by   = c(Study_Arm, Arm_Identity, template_name, sheet_name, Activity, row_id,
+        .by   = c(Study_Arm, template_name, sheet_name, Activity, row_id,
                   staff_group, edge_key, Department, `Staff.Role`, study_name, cpms_id)
       ) |>
       mutate(
@@ -377,9 +377,13 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
         `Template Level (Project | Participant | ProjectSite)` = NA,
         `Project Arm (Participant only)`                       = template_name,
         `Project Site Name (ProjectSite only)`                 = NA,
-        `Cost Item Description`                                = append_staff_role_description(
-          str_replace_all(Activity, "\\.", " "),
-          `Staff.Role`
+        `Cost Item Description`                                = if_else(
+          sheet_name == "Unscheduled Activities",
+          append_staff_role_description(
+            str_replace_all(Activity, "\\.", " "),
+            `Staff.Role`
+          ),
+          str_replace_all(Activity, "\\.", " ")
         ),
         `Analysis Code`                                        = edge_key,
         `Cost Category`                                        = "Research Cost",
@@ -595,6 +599,13 @@ build_all_edge_templates <- function(data, visit_lookup, edge_id) {
     mutate(
       template_arm = resolve_edge_template_arm(sheet_name, Study_Arm)
     )
+
+  if (any(trimws(coalesce(as.character(main_data$template_arm), "")) == "SSP")) {
+    stop(
+      "build_all_edge_templates(): SSP rows lost their originating main-arm sheet; ",
+      "a standalone SSP template is not valid."
+    )
+  }
   
   custom_data <- data |> filter(sheet_name == .CUSTOM_SHEET)
   

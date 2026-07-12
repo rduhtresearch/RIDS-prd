@@ -201,7 +201,9 @@ edgeBuilderUI <- function(id) {
   )
 }
 
-edgeBuilderServer <- function(id, edge_templates) {
+edgeBuilderServer <- function(id, edge_templates,
+                              version_type = reactive("baseline"),
+                              version_number = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
@@ -382,6 +384,13 @@ edgeBuilderServer <- function(id, edge_templates) {
       req(rv$active, rv$templates)
       
       df <- visible_rows()
+      display_template <- stats::setNames(list(df), rv$active)
+      display_template <- qualify_amendment_analysis_codes(
+        display_template,
+        version_type = version_type(),
+        version_number = version_number()
+      )
+      df <- display_template[[1]]
       
       # Pin column order: Department first, then everything else in its existing order
       preferred_order <- c("Department", "Cost Item Description", "Default Cost", "Analysis Code")

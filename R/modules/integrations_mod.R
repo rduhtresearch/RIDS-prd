@@ -1,10 +1,12 @@
 integrationsUI <- function(id) {
   ns <- NS(id)
 
-  tagList(
+  div(
+    class = "rids-page rids-form-page",
+    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Connections"), h1("Integrations"), p("Connect RIDS securely to external research systems.")), div(class = "rids-page-mark", icon("plug"))),
     fluidRow(
       bs4Card(
-        title = "EDGE Integration",
+        title = tagList(icon("link"), " EDGE integration"),
         width = 8,
         status = "primary",
         solidHeader = FALSE,
@@ -24,7 +26,7 @@ integrationsUI <- function(id) {
         )
       ),
       bs4Card(
-        title = "How It Works",
+        title = tagList(icon("info-circle"), " How it works"),
         width = 4,
         status = "white",
         solidHeader = FALSE,

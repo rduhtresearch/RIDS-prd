@@ -622,9 +622,12 @@ step4_available_preview_arms <- function(templates = NULL) {
 
 step4_UI <- function(id) {
   ns <- NS(id)
-  tagList(
+  div(
+    class = "rids-page rids-workflow-page",
+    div(class = "rids-page-header rids-workflow-header", div(div(class = "rids-page-eyebrow", "ICT processing · Step 4 of 4"), h1("Generate outputs"), p("Review, refine and export EDGE-ready templates.")), div(class = "rids-page-mark", icon("file-export"))),
+    uiOutput(ns("amendment_banner")),
     bs4Card(
-      title       = "Generate EDGE Templates",
+      title       = "EDGE templates",
       width       = 12,
       status      = "primary",
       solidHeader = FALSE,
@@ -646,6 +649,8 @@ step4_UI <- function(id) {
 
 step4_Server <- function(id, auth_state, shared_state, current_step) {
   moduleServer(id, function(input, output, session) {
+    output$amendment_banner <- render_amendment_workflow_banner(shared_state)
+
     study_identity_params <- function() {
       list(
         as.character(shared_state$cpms_id),
@@ -680,7 +685,9 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
     # ── Edge template builder module ─────────────────────────────────────────
     edited_templates <- edgeBuilderServer(
       id             = "edge_builder",
-      edge_templates = reactive(shared_state$edge_templates)
+      edge_templates = reactive(shared_state$edge_templates),
+      version_type = reactive(shared_state$template_version_type),
+      version_number = reactive(shared_state$template_version_number)
     )
     
     # ── ADDON ── custom activities module ─────────────────────────────────
@@ -767,6 +774,16 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       if (length(tpls) == 0) {
         stop("No templates with rows to export.")
       }
+      tpls <- suffix_amendment_template_names(
+        tpls,
+        version_type = shared_state$template_version_type,
+        effective_from_date = shared_state$template_version_effective_date
+      )
+      tpls <- qualify_amendment_analysis_codes(
+        tpls,
+        version_type = shared_state$template_version_type,
+        version_number = shared_state$template_version_number
+      )
       tpls <- blank_department(tpls)
       
       
@@ -780,8 +797,10 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       csv_files <- character(length(tpls))
       for (i in seq_along(tpls)) {
         nm <- names(tpls)[i]
-        # Make filename safe
-        safe_nm <- gsub("[^A-Za-z0-9_-]", "_", nm)
+        safe_nm <- edge_template_export_stem(
+          nm,
+          version_type = shared_state$template_version_type
+        )
         csv <- file.path(tmp_dir, paste0(safe_nm, ".csv"))
         write.csv(
           tpls[[i]],
@@ -990,7 +1009,11 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
             error = conditionMessage(e)
           )
         )
-        showNotification("Failed to adjust posting lines", type = "error")
+        showNotification(
+          paste("Failed to adjust posting lines:", conditionMessage(e)),
+          type = "error",
+          duration = 12
+        )
         w$hide()
         return(NULL)
       })
@@ -1053,13 +1076,26 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
         )
 
         rollback_result <- tryCatch({
-          delete_study_run(
-            cpms_id = as.character(shared_state$cpms_id),
-            study_site = as.character(shared_state$study_site),
-            scenario_id = as.character(shared_state$scenario_id),
-            con = CON,
-            delete_files = TRUE
-          )
+          if (!identical(shared_state$template_version_type, "baseline")) {
+            version <- rids_repos()$template_versions$find(shared_state$template_version_id)
+            result <- rids_repos()$template_versions$discard(
+              shared_state$template_version_id,
+              expected_study_id = shared_state$upload_id
+            )
+            if (nrow(version) > 0 && !is.na(version$saved_file_path[[1]]) &&
+                nzchar(version$saved_file_path[[1]]) && file.exists(version$saved_file_path[[1]])) {
+              unlink(version$saved_file_path[[1]])
+            }
+            result
+          } else {
+            delete_study_run(
+              cpms_id = as.character(shared_state$cpms_id),
+              study_site = as.character(shared_state$study_site),
+              scenario_id = as.character(shared_state$scenario_id),
+              con = CON,
+              delete_files = TRUE
+            )
+          }
         }, error = function(e) {
           e
         })
@@ -1096,7 +1132,12 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
             paste(
               "Cost centre matrix validation failed.",
               nrow(unmatched_summary),
-              "unsupported condition(s) were found. The study was deleted and must be started again."
+              "unsupported condition(s) were found.",
+              if (identical(shared_state$template_version_type, "baseline")) {
+                "The study was deleted and must be started again."
+              } else {
+                "The new amendment was removed; existing template versions were not changed."
+              }
             ),
             type = "error",
             duration = 12
@@ -1153,7 +1194,8 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
           adjusted,
           identity_params[[1]],
           identity_params[[2]],
-          identity_params[[3]]
+          identity_params[[3]],
+          shared_state$template_version_id
         )
         log_step4_event(
           level = "INFO",
@@ -1200,7 +1242,8 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
         visit_lookup <- rids_repos()$ict_costing$visit_lookup(
           as.character(shared_state$cpms_id),
           as.character(shared_state$study_site),
-          as.character(shared_state$scenario_id)
+          as.character(shared_state$scenario_id),
+          shared_state$template_version_id
         )
         
         templates <- build_all_edge_templates(adjusted, visit_lookup, shared_state$upload_meta$edge_id)
@@ -1242,32 +1285,32 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       # Initial ZIP write — uses original templates (user hasn't touched yet).
       # The download handler regenerates from edited_templates() on click.
       zip_saved_ok <- tryCatch({
-        timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-        zip_name  <- paste0(
-          shared_state$cpms_id,
-          "_",
-          shared_state$study_site,
-          "_",
-          shared_state$scenario_id,
-          "_",
-          timestamp,
-          ".zip"
+        zip_name <- paste0(
+          "template_version_",
+          as.integer(shared_state$template_version_id),
+          "_edge_templates.zip"
         )
-        zp        <- file.path(EDGE_OUTPUT_DIR, zip_name)
+        zp <- file.path(EDGE_OUTPUT_DIR, zip_name)
 
         if (!dir.exists(EDGE_OUTPUT_DIR)) dir.create(EDGE_OUTPUT_DIR, recursive = TRUE)
         
         write_zip(tmpl, zp)
         zip_path(zp)
         
-        # Persist the ZIP path to meta_data for this study
-        zip_identity <- study_identity_params()
-        rids_repos()$studies$set_edge_zip_path(
+        rids_repos()$template_versions$set_edge_zip_path(
+          shared_state$template_version_id,
           zp,
-          zip_identity[[1]],
-          zip_identity[[2]],
-          zip_identity[[3]]
+          expected_study_id = shared_state$upload_id
         )
+        if (identical(shared_state$template_version_type, "baseline")) {
+          zip_identity <- study_identity_params()
+          rids_repos()$studies$set_edge_zip_path(
+            zp,
+            zip_identity[[1]],
+            zip_identity[[2]],
+            zip_identity[[3]]
+          )
+        }
 
         log_step4_event(
           level = "INFO",
@@ -1328,7 +1371,18 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       preview_arm <- step4_effective_preview_arm(input$arm_select, tpls)
       req(preview_arm)
 
-      df <- blank_department(tpls)[[preview_arm]]
+      preview_template <- stats::setNames(list(tpls[[preview_arm]]), preview_arm)
+      preview_template <- suffix_amendment_template_names(
+        preview_template,
+        version_type = shared_state$template_version_type,
+        effective_from_date = shared_state$template_version_effective_date
+      )
+      preview_template <- qualify_amendment_analysis_codes(
+        preview_template,
+        version_type = shared_state$template_version_type,
+        version_number = shared_state$template_version_number
+      )
+      df <- blank_department(preview_template)[[1]]
       
       reactable(
         df,
@@ -1444,6 +1498,10 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
             template_count = length(final_templates),
             zip_path = current_zip_path
           )
+        )
+        rids_repos()$template_versions$activate(
+          shared_state$template_version_id,
+          expected_study_id = shared_state$upload_id
         )
         TRUE
       }, error = function(e) {

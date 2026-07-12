@@ -1,7 +1,9 @@
 adminUI <- function(id) {
   ns <- NS(id)
 
-  tagList(
+  div(
+    class = "rids-page rids-admin-page rids-form-page",
+    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Administration"), h1("Admin"), p("Manage access, application settings and operational files.")), div(class = "rids-page-mark", icon("users-cog"))),
     fluidRow(
       bs4Card(
         title = "User Management",

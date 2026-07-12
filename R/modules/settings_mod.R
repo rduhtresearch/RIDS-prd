@@ -1,10 +1,12 @@
 settingsUI <- function(id) {
   ns <- NS(id)
 
-  tagList(
+  div(
+    class = "rids-page rids-form-page",
+    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Account"), h1("Settings"), p("Manage your profile security and account details.")), div(class = "rids-page-mark", icon("cog"))),
     fluidRow(
       bs4Card(
-        title = "Change Password",
+        title = tagList(icon("key"), " Change password"),
         width = 6,
         status = "primary",
         solidHeader = FALSE,
@@ -14,7 +16,7 @@ settingsUI <- function(id) {
         actionButton(ns("change_password"), "Update password", class = "btn-primary")
       ),
       bs4Card(
-        title = "Account",
+        title = tagList(icon("user-circle"), " Account details"),
         width = 6,
         status = "primary",
         solidHeader = FALSE,

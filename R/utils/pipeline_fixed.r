@@ -22,7 +22,7 @@ require_pkg <- function(pkg) {
 get_visit_cols <- function(df) {
   if (!("Activity.Cost" %in% names(df))) stop("Missing column: Activity.Cost")
   if (!("Total.Activity.Cost" %in% names(df))) stop("Missing column: Total.Activity.Cost")
-  
+
   start_col <- which(names(df) == "Activity.Cost") + 1
   end_col   <- which(names(df) == "Total.Activity.Cost") - 1
   if (start_col > end_col) stop("No visit/occurrence columns found between Activity.Cost and Total.Activity.Cost")
@@ -118,6 +118,7 @@ apply_flags_and_clean_legacy <- function(df, sheet_name, study_value, cpms_id) {
 }
 
 extract_mff_lookup <- function(df, sheet_name, study_value, cpms_id) {
+  sheet_name <- trimws(sheet_name)
   visit_cols <- get_visit_cols(df)
   
   mff_row <- df %>%
@@ -143,15 +144,23 @@ extract_mff_lookup <- function(df, sheet_name, study_value, cpms_id) {
   
   tdf <- tdf %>%
     rename(Visit_Label = Visit_Name) %>%
-    mutate(Activity_Name = NA_character_)
+    mutate(
+      Arm_Identity = Study_Arm,
+      Activity_Name = NA_character_
+    )
   
   tdf %>%
-    select(CPMS_ID, Study, Visit_Number, Study_Arm, Visit_Label, Activity_Name, ICT_Cost) %>%
+    select(CPMS_ID, Study, Visit_Number, Study_Arm, Arm_Identity,
+           Visit_Label, Activity_Name, ICT_Cost) %>%
     mutate(activity_occurrence_id = NA_integer_,
            staff_group            = NA_integer_)
 }
 
-expand_to_visit_rows_legacy <- function(df, study_value, cpms_id, study_arm_value, visit_label_lookup = NULL) {
+expand_to_visit_rows_legacy <- function(df, study_value, cpms_id, study_arm_value,
+                                        visit_label_lookup = NULL,
+                                        arm_identity_value = study_arm_value) {
+  study_arm_value <- trimws(as.character(study_arm_value))
+  arm_identity_value <- trimws(as.character(arm_identity_value))
   visit_cols <- get_visit_cols(df)
   
   flags <- df[, visit_cols, drop = FALSE]
@@ -190,6 +199,7 @@ expand_to_visit_rows_legacy <- function(df, study_value, cpms_id, study_arm_valu
         Study                  = rep(study_value, n),
         Visit_Number           = rep(visit_number, n),
         Study_Arm              = rep(study_arm_value, n),
+        Arm_Identity           = rep(arm_identity_value, n),
         Visit_Label            = rep(visit_label, n),
         Activity_Name          = rep(df$Activity[i], n),
         ICT_Cost               = rep(cost_per_occ[i], n),
@@ -203,7 +213,7 @@ expand_to_visit_rows_legacy <- function(df, study_value, cpms_id, study_arm_valu
   result <- bind_rows(out_list)
   
   result <- result %>%
-    group_by(Visit_Number, Activity_Name) %>%
+    group_by(Visit_Number, Arm_Identity, Activity_Name, staff_group) %>%
     mutate(activity_occurrence_id = row_number()) %>%
     ungroup() %>%
     as.data.frame()
@@ -217,28 +227,52 @@ build_ua_ssp_lookup_from_sheet <- function(df, study_value, cpms_id, visit_label
   out <- list()
   
   df_sc <- df %>% filter(Flag == "Setup & Closedown")
-  if (nrow(df_sc) > 0) out[["SC"]] <- expand_to_visit_rows_legacy(df_sc, study_value, cpms_id, "SC", visit_label_lookup)
+  if (nrow(df_sc) > 0) out[["SC"]] <- expand_to_visit_rows_legacy(
+    df_sc, study_value, cpms_id, "SC", visit_label_lookup,
+    arm_identity_value = "SC"
+  )
   
   df_ssp <- df %>% filter(Flag == "Scheduled / Some Participants")
-  if (nrow(df_ssp) > 0) out[["SSP"]] <- expand_to_visit_rows_legacy(df_ssp, study_value, cpms_id, "SSP", visit_label_lookup)
+  if (nrow(df_ssp) > 0) {
+    ssp_identity <- unique(trimws(as.character(df_ssp$SheetName)))
+    ssp_identity <- ssp_identity[!is.na(ssp_identity) & nzchar(ssp_identity)]
+    if (length(ssp_identity) == 0) ssp_identity <- "SSP"
+
+    out[["SSP"]] <- expand_to_visit_rows_legacy(
+      df_ssp, study_value, cpms_id, "SSP", visit_label_lookup,
+      arm_identity_value = ssp_identity[[1]]
+    )
+  }
   
   df_ua <- df %>% filter(Flag == "Unscheduled / Itemised Activities")
-  if (nrow(df_ua) > 0) out[["UA"]] <- expand_to_visit_rows_legacy(df_ua, study_value, cpms_id, "UA", visit_label_lookup)
+  if (nrow(df_ua) > 0) {
+    ua_identity <- unique(trimws(as.character(df_ua$SheetName)))
+    ua_identity <- ua_identity[!is.na(ua_identity) & nzchar(ua_identity)]
+    if (length(ua_identity) == 0) ua_identity <- "Unscheduled Activities"
+
+    out[["UA"]] <- expand_to_visit_rows_legacy(
+      df_ua, study_value, cpms_id, "UA", visit_label_lookup,
+      arm_identity_value = ua_identity[[1]]
+    )
+  }
   
   bind_rows(out)
 }
 
-persist_ict_to_duckdb <- function(db_path, ict_cost_table) {
+persist_ict_to_duckdb <- function(db_path, ict_cost_table, version_id = NULL) {
   ict_cost_table$Contract_Cost <- NA_real_
+  if (!"Arm_Identity" %in% names(ict_cost_table)) {
+    ict_cost_table$Arm_Identity <- ict_cost_table$Study_Arm
+  }
 
   # Reorder columns to match table schema exactly
   ict_cost_table <- ict_cost_table[, c(
-    "CPMS_ID", "study_site", "scenario_id", "Study", "Visit_Number", "Study_Arm", "Visit_Label",
+    "CPMS_ID", "study_site", "scenario_id", "Study", "Visit_Number", "Study_Arm", "Arm_Identity", "Visit_Label",
     "Activity_Name", "ICT_Cost", "Contract_Cost", "activity_occurrence_id", "staff_group"
   )]
 
   if (identical(get0("STORAGE_MODE", ifnotfound = "duckdb"), "postgres")) {
-    rids_repos()$ict_costing$replace_from_staging(ict_cost_table)
+    rids_repos()$ict_costing$replace_from_staging(ict_cost_table, version_id)
     return(invisible(TRUE))
   }
 
@@ -248,13 +282,14 @@ persist_ict_to_duckdb <- function(db_path, ict_cost_table) {
   con <- DBI::dbConnect(duckdb::duckdb(), dbdir = db_path)
   on.exit(DBI::dbDisconnect(con, shutdown = TRUE), add = TRUE)
 
-  ict_costing_repository(con)$replace_from_staging(ict_cost_table)
+  ict_costing_repository(con)$replace_from_staging(ict_cost_table, version_id)
   invisible(TRUE)
 }
 
 # ── Stage A ───────────────────────────────────────────────────────────────────
 
-run_stage_a <- function(input_file, db_path = NULL, study_site = NULL, scenario_id = NULL) {
+run_stage_a <- function(input_file, db_path = NULL, study_site = NULL,
+                        scenario_id = NULL, version_id = NULL) {
   if (is.na(input_file) || !file.exists(input_file)) {
     stop("run_stage_a(): input file not found: ", input_file)
   }
@@ -311,7 +346,7 @@ run_stage_a <- function(input_file, db_path = NULL, study_site = NULL, scenario_
     if (nrow(ict_cost_table) > 0) {
       ict_cost_table$study_site <- study_site
       ict_cost_table$scenario_id <- scenario_id
-      persist_ict_to_duckdb(db_path, ict_cost_table)
+      persist_ict_to_duckdb(db_path, ict_cost_table, version_id)
     }
   }
   
@@ -451,7 +486,7 @@ run_stage_b <- function(df) {
 #' @param db_path      Optional. Full path to RIDS.duckdb (e.g. "~/nhs_finance_app_data/RIDS.duckdb").
 #' @return             Named list of long-format dataframes (one per sheet), invisibly.
 process_workbook <- function(input_path, archive_dir = NULL, export_path = NULL, db_path = NULL,
-                             study_site = NULL, scenario_id = NULL) {
+                             study_site = NULL, scenario_id = NULL, version_id = NULL) {
   
   if (missing(input_path) || !nzchar(input_path)) stop("process_workbook(): input_path is required.")
   if (!file.exists(input_path)) stop("process_workbook(): file not found: ", input_path)
@@ -467,25 +502,61 @@ process_workbook <- function(input_path, archive_dir = NULL, export_path = NULL,
     input_file = input_path,
     db_path = db_path,
     study_site = study_site,
-    scenario_id = scenario_id
+    scenario_id = scenario_id,
+    version_id = version_id
   )
   df_long <- run_stage_b(df = stage_a_result$processed_sheets)
   df_long <- add_study_arm(df_long)
-  UA_ARMS <- c("UA", "SC", "SSP")
-  
+
+  visit_labels <- stage_a_result$ict_cost_table %>%
+    filter(!is.na(Visit_Label), nzchar(trimws(as.character(Visit_Label)))) %>%
+    summarise(Visit_Label = first(Visit_Label), .by = c(Study, Visit_Number))
+
+  df_long <- imap(df_long, function(df, sheet_nm) {
+    if (is.null(df) || nrow(df) == 0 || "Visit_Label" %in% names(df)) return(df)
+    if (nrow(visit_labels) == 0) {
+      df$Visit_Label <- df$Visit
+      return(as.data.frame(df))
+    }
+
+    df %>%
+      left_join(
+        visit_labels,
+        by = c("study_name" = "Study", "Visit" = "Visit_Number")
+      ) %>%
+      mutate(Visit_Label = coalesce(Visit_Label, Visit)) %>%
+      as.data.frame()
+  })
+
   df_long <- imap(df_long, function(df, sheet_nm) {
     if (is.null(df) || nrow(df) == 0) return(df)
-    
-    if (any(df$Study_Arm %in% UA_ARMS) ||
-        sheet_nm %in% c("Unscheduled Activities", "Setup & Closedown")) {
-      df$activity_occurrence_id <- 1L
+
+    source_sheet <- if ("SheetName" %in% names(df)) {
+      trimws(as.character(df$SheetName))
     } else {
-      grp_vars <- intersect(c("Study_Arm", "Activity", "Visit", "Visit_Label"), names(df))
-      df <- df %>%
-        group_by(across(all_of(grp_vars))) %>%
-        mutate(activity_occurrence_id = row_number()) %>%
-        ungroup()
+      rep(trimws(sheet_nm), nrow(df))
     }
+    source_sheet[is.na(source_sheet) | source_sheet == ""] <- trimws(sheet_nm)
+
+    df$Arm_Identity <- ifelse(
+      df$Study_Arm %in% c("UA", "SSP"),
+      source_sheet,
+      trimws(as.character(df$Study_Arm))
+    )
+    as.data.frame(df)
+  })
+
+  df_long <- imap(df_long, function(df, sheet_nm) {
+    if (is.null(df) || nrow(df) == 0) return(df)
+
+    grp_vars <- intersect(
+      c("Study_Arm", "Arm_Identity", "Activity", "Visit", "Visit_Label", "staff_group"),
+      names(df)
+    )
+    df <- df %>%
+      group_by(across(all_of(grp_vars))) %>%
+      mutate(activity_occurrence_id = row_number()) %>%
+      ungroup()
     
     as.data.frame(df)
   })
@@ -494,6 +565,7 @@ process_workbook <- function(input_path, archive_dir = NULL, export_path = NULL,
     if (is.null(df) || nrow(df) == 0) return(df)
     df$study_site <- if (is.null(study_site)) NA_character_ else as.character(study_site)
     df$scenario_id <- if (is.null(scenario_id)) NA_character_ else as.character(scenario_id)
+    df$version_id <- if (is.null(version_id)) NA_integer_ else as.integer(version_id)
     as.data.frame(df)
   })
   

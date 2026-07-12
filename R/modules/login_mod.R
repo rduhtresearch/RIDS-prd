@@ -12,16 +12,26 @@ loginUI <- function(id) {
         class = "card login-card",
         div(
           class = "card-body",
-          h1(
-            class = "login-title",
-            "RIDS ",
-            span(
-              style = "font-size: 0.95rem; color: #697786; font-weight: 400;",
-              app_version_label
+          div(
+            class = "login-brand",
+            div(
+              class = "login-brand-mark",
+              icon("layer-group")
+            ),
+            div(
+              class = "login-brand-copy",
+              span(class = "login-eyebrow", "Research operations"),
+              h1(class = "login-title", "RIDS"),
+              span(class = "login-version", app_version_label)
             )
+          ),
+          p(
+            class = "login-intro",
+            "Secure access to study setup, costing and reporting."
           ),
 
           div(
+            class = "login-view-stack",
             id = ns("login_view"),
             div(
               class = "login-form",
