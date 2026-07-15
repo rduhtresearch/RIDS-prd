@@ -58,6 +58,123 @@ run_step4_persistence_tests <- function() {
     identical(selected_empty_edits, original_templates)
   )
 
+  empty_template <- original_templates[[1]][0, , drop = FALSE]
+  filtered_templates <- step4_filter_export_templates(list(
+    "Missing" = NULL,
+    "Empty" = empty_template,
+    "Arm A" = original_templates[[1]]
+  ))
+  .step4_expect(
+    "export filtering drops missing and empty templates without reordering",
+    identical(filtered_templates, original_templates)
+  )
+
+  department_templates <- list(
+    "Arm A" = data.frame(
+      Department = c("Research", "Pharmacy"),
+      Value = c(1L, 2L),
+      stringsAsFactors = FALSE
+    ),
+    "Arm B" = data.frame(
+      Value = 3L,
+      stringsAsFactors = FALSE
+    )
+  )
+  blanked_templates <- step4_blank_export_departments(department_templates)
+  .step4_expect(
+    "export preparation blanks internal departments",
+    identical(blanked_templates[["Arm A"]]$Department, c(NA, NA))
+  )
+  .step4_expect(
+    "department blanking leaves templates without that column unchanged",
+    identical(blanked_templates[["Arm B"]], department_templates[["Arm B"]])
+  )
+  .step4_expect(
+    "department blanking does not mutate its input",
+    identical(department_templates[["Arm A"]]$Department, c("Research", "Pharmacy"))
+  )
+
+  amendment_templates <- list(
+    "Arm A" = data.frame(
+      `Template Name` = "Arm A",
+      `Analysis Code` = "EDGE-0001",
+      Department = "Research",
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  amended_templates <- step4_apply_amendment_export_rules(
+    amendment_templates,
+    version_type = "substantial_amendment",
+    effective_from_date = as.Date("2026-07-10"),
+    version_number = 3L
+  )
+  amendment_name <- "Arm A [SUBSTANTIAL AMENDMENT - 10 Jul 2026]"
+  .step4_expect(
+    "export rules qualify amendment template names",
+    identical(names(amended_templates), amendment_name) &&
+      identical(amended_templates[[1]][["Template Name"]], amendment_name)
+  )
+  .step4_expect(
+    "export rules qualify amendment analysis codes",
+    identical(amended_templates[[1]][["Analysis Code"]], "V3-EDGE-0001")
+  )
+
+  zip_target <- tempfile("step4_export_test_", fileext = ".zip")
+  zip_extract_dir <- tempfile("step4_export_contents_")
+  dir.create(zip_extract_dir, recursive = TRUE)
+  on.exit(unlink(c(zip_target, zip_extract_dir), recursive = TRUE), add = TRUE)
+
+  zip_templates <- list(
+    "Arm A" = data.frame(
+      `Template Name` = "Arm A",
+      `Analysis Code` = "EDGE-0001",
+      Department = "Research",
+      Value = 1L,
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    ),
+    "Empty Arm" = data.frame(
+      `Template Name` = character(),
+      `Analysis Code` = character(),
+      Department = character(),
+      Value = integer(),
+      check.names = FALSE,
+      stringsAsFactors = FALSE
+    )
+  )
+  written_zip <- step4_write_export_zip(
+    zip_templates,
+    zip_path = zip_target,
+    version_type = "baseline",
+    effective_from_date = NULL,
+    version_number = NULL
+  )
+  zip_members <- utils::unzip(zip_target, list = TRUE)$Name
+  utils::unzip(zip_target, exdir = zip_extract_dir)
+  csv_lines <- readLines(file.path(zip_extract_dir, "Arm_A.csv"), warn = FALSE)
+
+  .step4_expect(
+    "ZIP writing returns the requested path and creates a non-empty archive",
+    identical(written_zip, zip_target) &&
+      file.exists(zip_target) &&
+      file.info(zip_target)$size > 0
+  )
+  .step4_expect(
+    "ZIP writing filters empty templates and preserves export filenames",
+    identical(zip_members, "Arm_A.csv")
+  )
+  .step4_expect(
+    "ZIP CSV content preserves columns and blanks Department",
+    identical(
+      csv_lines,
+      c(
+        "\"Template Name\",\"Analysis Code\",\"Department\",\"Value\"",
+        "\"Arm A\",\"EDGE-0001\",,1"
+      )
+    )
+  )
+
   .step4_expect(
     "display mode shows validation failure when failure is active",
     identical(
