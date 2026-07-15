@@ -155,13 +155,19 @@ read_ict_workbook <- function(ict) {
     warning("read_ict_workbook(): 'Arm_Identity' column missing -- defaulting to Study_Arm. ",
             "Multi-arm unscheduled rows may not join correctly.")
     source_sheet <- if ("SheetName" %in% names(df)) {
-      df$SheetName
+      trimws(as.character(df$SheetName))
     } else if ("sheet_name" %in% names(df)) {
-      df$sheet_name
+      trimws(as.character(df$sheet_name))
     } else {
-      df$Study_Arm
+      rep(NA_character_, nrow(df))
     }
-    df$Arm_Identity <- ifelse(df$Study_Arm == "UA", source_sheet, df$Study_Arm)
+    source_sheet[is.na(source_sheet) | source_sheet == ""] <-
+      df$Study_Arm[is.na(source_sheet) | source_sheet == ""]
+    df$Arm_Identity <- ifelse(
+      df$Study_Arm %in% c("UA", "SSP"),
+      source_sheet,
+      df$Study_Arm
+    )
   }
   if (!"Visit_Label" %in% names(df)) {
     warning("read_ict_workbook(): 'Visit_Label' column missing -- defaulting to Visit. ",
@@ -256,9 +262,30 @@ load_rules <- function(db_path, ruleset_id) {
 #' @param db_path  Path to the DuckDB containing ict_costing_tbl.
 #' @return df with `contract_cost` column attached from saved Step 2 values.
 join_ict_costs <- function(df, db_path) {
+  run_identity <- df %>%
+    transmute(
+      cpms_id = as.character(cpms_id),
+      study_site = as.character(study_site),
+      scenario_id = as.character(scenario_id),
+      version_id = if ("version_id" %in% names(df)) as.integer(version_id) else NA_integer_
+    ) %>%
+    distinct()
+
+  if (nrow(run_identity) != 1L) {
+    stop("join_ict_costs(): posting input must contain exactly one study run and template version.")
+  }
+
+  active_version <- run_identity$version_id[[1]]
+  if (is.na(active_version)) active_version <- NULL
+
   if (identical(get0("STORAGE_MODE", ifnotfound = "duckdb"), "postgres")) {
     repo <- rids_repos()$ict_costing
-    ict <- if (repo$exists_table()) repo$all_contract_costs() else NULL
+    ict <- if (repo$exists_table()) {
+      repo$contract_costs_for_run(
+        run_identity$cpms_id[[1]], run_identity$study_site[[1]],
+        run_identity$scenario_id[[1]], active_version
+      )
+    } else NULL
   } else if (!file.exists(db_path)) {
     warning("join_ict_costs(): DB not found: ", db_path, " -- skipping contract cost join.")
     df$contract_cost <- NA_real_
@@ -269,7 +296,10 @@ join_ict_costs <- function(df, db_path) {
       if (!repo$exists_table()) {
         return(NULL)
       }
-      repo$all_contract_costs()
+      repo$contract_costs_for_run(
+        run_identity$cpms_id[[1]], run_identity$study_site[[1]],
+        run_identity$scenario_id[[1]], active_version
+      )
     })
   }
 
@@ -278,7 +308,7 @@ join_ict_costs <- function(df, db_path) {
     df$contract_cost <- NA_real_
     return(df)
   }
-  
+
   # ── Row-level join: activity rows (Activity_Name NOT NULL) ─────────────────
   # staff_group is the disambiguator: same activity at the same visit with
   # different staff/costs gets a unique staff_group in pipeline_fixed.r.
@@ -290,21 +320,52 @@ join_ict_costs <- function(df, db_path) {
     ict$Arm_Identity <- ict$Study_Arm
   }
 
+  use_occurrence_id <- "activity_occurrence_id" %in% names(df) &&
+    "activity_occurrence_id" %in% names(ict)
+
+  activity_key_cols <- c(
+    "CPMS_ID", "study_site", "scenario_id", "Visit_Number", "Arm_Identity",
+    "Activity_Name", "staff_group"
+  )
+  if (use_occurrence_id) activity_key_cols <- c(activity_key_cols, "activity_occurrence_id")
+
   ict_activity <- ict %>%
     filter(!is.na(Activity_Name)) %>%
-    select(CPMS_ID, study_site, scenario_id, Visit_Number, Arm_Identity,
-           Activity_Name, staff_group, Contract_Cost)
+    select(all_of(activity_key_cols), Contract_Cost)
+
+  duplicate_activity_keys <- ict_activity %>%
+    count(across(all_of(activity_key_cols)), name = "matches") %>%
+    filter(matches > 1L)
+  if (nrow(duplicate_activity_keys) > 0) {
+    example <- duplicate_activity_keys[1, , drop = FALSE]
+    stop(
+      "join_ict_costs(): duplicate activity contract-cost keys would fan out posting rows. ",
+      "Example: arm=", example$Arm_Identity[[1]],
+      ", visit=", example$Visit_Number[[1]],
+      ", activity=", example$Activity_Name[[1]],
+      ", staff_group=", example$staff_group[[1]],
+      if (use_occurrence_id) paste0(", occurrence=", example$activity_occurrence_id[[1]]) else "",
+      "."
+    )
+  }
   
+  activity_join <- c(
+    "cpms_id" = "CPMS_ID",
+    "study_site" = "study_site",
+    "scenario_id" = "scenario_id",
+    "Visit" = "Visit_Number",
+    "Arm_Identity" = "Arm_Identity",
+    "Activity" = "Activity_Name",
+    "staff_group" = "staff_group"
+  )
+  if (use_occurrence_id) {
+    activity_join <- c(activity_join, "activity_occurrence_id" = "activity_occurrence_id")
+  }
+
   df <- df %>%
     left_join(
       ict_activity %>% rename(contract_cost_activity = Contract_Cost),
-      by = c("cpms_id"     = "CPMS_ID",
-             "study_site"  = "study_site",
-             "scenario_id" = "scenario_id",
-             "Visit"       = "Visit_Number",
-             "Arm_Identity" = "Arm_Identity",
-             "Activity"    = "Activity_Name",
-             "staff_group" = "staff_group")
+      by = activity_join
     )
   
   # ── Visit-level join: MFF summary rows (Activity_Name IS NULL) ─────────────
@@ -313,6 +374,13 @@ join_ict_costs <- function(df, db_path) {
     filter(is.na(Activity_Name)) %>%
     select(CPMS_ID, study_site, scenario_id, Visit_Number, Arm_Identity, Contract_Cost) %>%
     rename(contract_cost_visit = Contract_Cost)
+
+  duplicate_visit_keys <- ict_visit %>%
+    count(CPMS_ID, study_site, scenario_id, Visit_Number, Arm_Identity, name = "matches") %>%
+    filter(matches > 1L)
+  if (nrow(duplicate_visit_keys) > 0) {
+    stop("join_ict_costs(): duplicate visit contract-cost keys would fan out posting rows.")
+  }
   
   df <- df %>%
     left_join(
@@ -348,7 +416,7 @@ apply_dist_rules <- function(df, dist_rules, scenario_id,
   carry_cols <- intersect(
     names(df),
     c("sheet_name", "Study_Arm", "Arm_Identity", "Visit", "Activity", "cpms_id", "study_name",
-      "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
+      "row_id", "scenario_id", "version_id", "row_category_auto", "calc_tag", "row_category",
       "is_medic", "Visit_Label", "activity_occurrence_id", "staff_group",
       "provider_org", "pi_org", "Activity.Cost", "contract_cost", "Department",
       "Cost_Type", "Staff.Role", "Activity.Type", "Time.Required")
@@ -537,7 +605,7 @@ select_output_cols <- function(posting_plan) {
     select(all_of(c(
       core,
       intersect(
-        c("sheet_name", "Arm_Identity", "Visit_Label", "activity_occurrence_id", "staff_group",
+        c("version_id", "sheet_name", "Arm_Identity", "Visit_Label", "activity_occurrence_id", "staff_group",
           "contract_cost", "Department", "Staff.Role", "activity_type",
           "time_required"),
         names(.)

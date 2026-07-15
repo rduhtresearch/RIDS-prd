@@ -8,49 +8,34 @@ appUI <- function(id) {
         tabItem(
           "tab_dashboard",
           div(
-            style = paste(
-              "min-height: calc(100vh - 12rem);",
-              "display: flex;",
-              "align-items: center;",
-              "justify-content: center;",
-              "padding: 2rem 1rem;"
-            ),
+            class = "rids-page rids-dashboard",
             div(
-              style = paste(
-                "width: 100%;",
-                "max-width: 52rem;"
+              class = "rids-dashboard-hero",
+              div(class = "rids-dashboard-mark", icon("layer-group")),
+              div(class = "rids-page-eyebrow", "Research operations platform"),
+              h1(
+                "Welcome to RIDS",
+                span(class = "rids-version-chip", app_version_label)
               ),
-              bs4Card(
-                width = 12,
-                status = "white",
-                solidHeader = FALSE,
-                collapsible = FALSE,
-                title = tagList(
-                  "Welcome to RIDS ",
-                  span(
-                    style = "font-size: 0.85rem; color: #697786; font-weight: 400;",
-                    app_version_label
-                  )
-                ),
+              p(
+                class = "rids-dashboard-lead",
+                "Research Income Distribution System"
+              ),
+              p(
+                "A rules-driven commercial research finance platform that applies AcoRD-based distribution logic to ICT costings, creating consistent income distribution outputs, automated reporting and EDGE-ready templates."
+              ),
+              div(
+                class = "rids-dashboard-callout",
+                div(class = "rids-dashboard-callout-icon", icon("arrow-left")),
                 div(
-                  style = "padding: 0.5rem 0.25rem 0.25rem;",
-                  p(
-                    style = "margin-bottom: 0.75rem; color: #1d2a36; font-size: 1.05rem; font-weight: 600;",
-                    "Research Income Distribution System"
-                  ),
-                  p(
-                    style = "margin-bottom: 0.75rem; color: #697786;",
-                    "Developed by the Research & Development Department at Royal Devon University Healthcare NHS Foundation Trust."
-                  ),
-                  p(
-                    style = "margin-bottom: 0.75rem; color: #697786;",
-                    "A rules-driven commercial research finance platform that applies AcoRD-based distribution logic to iCT costings, transforming them into consistent income distribution outputs, automated reporting, and EDGE-ready templates, with configurable rules to reflect local R&D finance policy and operational requirements."
-                  ),
-                  p(
-                    style = "margin-bottom: 0; color: #697786; font-weight: 600;",
-                    "Use the sidebar to get started."
-                  )
-                )
+                  strong("Start a workflow"),
+                  span("Use Process ICT in the sidebar to upload a workbook and begin costing.")
+                ),
+                div(class = "rids-dashboard-callout-status", icon("shield-alt"), " Validated workflow")
+              ),
+              p(
+                class = "rids-dashboard-credit",
+                "Developed by the Research & Development Department at Royal Devon University Healthcare NHS Foundation Trust."
               )
             )
           )
@@ -81,12 +66,21 @@ appServer <- function(id, auth_state, current_step) {
       cpms_id         = NULL,
       study_name      = NULL,
       upload_id       = NULL,
+      template_version_id = NULL,
+      template_version_number = NULL,
+      template_version_type = NULL,
+      template_version_effective_date = NULL,
       filename        = NULL,
       upload_meta     = NULL,
       raw_ict         = NULL,
       posting_plan    = NULL,
+      evaluated_plan  = NULL,
       processed_ict   = NULL,
       edge_templates  = NULL,
+      speciality_id   = NULL,
+      speciality_name = NULL,
+      mff_split_enabled = FALSE,
+      mff_split_pct   = 0,
       include_screening_failure = FALSE,
       screening_failure_arm = NULL,
       current_step    = NULL,
@@ -107,12 +101,21 @@ appServer <- function(id, auth_state, current_step) {
       shared_state$cpms_id <- NULL
       shared_state$study_name <- NULL
       shared_state$upload_id <- NULL
+      shared_state$template_version_id <- NULL
+      shared_state$template_version_number <- NULL
+      shared_state$template_version_type <- NULL
+      shared_state$template_version_effective_date <- NULL
       shared_state$filename <- NULL
       shared_state$upload_meta <- NULL
       shared_state$raw_ict <- NULL
       shared_state$posting_plan <- NULL
+      shared_state$evaluated_plan <- NULL
       shared_state$processed_ict <- NULL
       shared_state$edge_templates <- NULL
+      shared_state$speciality_id <- NULL
+      shared_state$speciality_name <- NULL
+      shared_state$mff_split_enabled <- FALSE
+      shared_state$mff_split_pct <- 0
       shared_state$include_screening_failure <- FALSE
       shared_state$screening_failure_arm <- NULL
       shared_state$current_step <- NULL
@@ -126,20 +129,22 @@ appServer <- function(id, auth_state, current_step) {
     step2_Server("step2", auth_state, shared_state, current_step)
     step3_Server("step3", auth_state, shared_state, current_step)
     step4_Server("step4", auth_state, shared_state, current_step)
-    progressServer("progress", current_step)
+    progressServer("progress", current_step, shared_state)
     reportingServer("reporting", auth_state)
     settingsServer("settings", auth_state)
     integrationsServer("integrations", auth_state)
     libraryServer("library", auth_state, shared_state)
     supportServer("support", auth_state)
-    studyWorkspaceServer("study_workspace", shared_state)
+    studyWorkspaceServer("study_workspace", auth_state, shared_state, current_step)
 
     output$admin_tab <- renderUI({
       if (!isTRUE(is_admin(auth_state$role))) {
         return(
           div(
-            style = "padding: 1.5rem; color: #697786;",
-            "Admin access is required for this area."
+            class = "rids-page rids-empty-state",
+            div(class = "rids-empty-icon", icon("lock")),
+            h2("Admin access required"),
+            p("Your account does not have permission to open this area.")
           )
         )
       }

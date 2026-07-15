@@ -113,7 +113,13 @@ test_that("study/ict/posting round-trips keep canonical column names on postgres
     mff_split_enabled = FALSE, mff_split_pct = 0
   )
   expect_true(repos$studies$exists_run("77001", "RDUHT", "A"))
-  expect_true(is.numeric(repos$studies$last_upload_id()) || is.integer(repos$studies$last_upload_id()))
+  study_id <- repos$studies$last_upload_id()
+  expect_true(is.numeric(study_id) || is.integer(study_id))
+  version_id <- repos$template_versions$create(
+    study_id, "baseline", original_filename = "x.xlsx", saved_file_path = "/tmp/x.xlsx"
+  )
+  repos$template_versions$set_edge_zip_path(version_id, "/tmp/x.zip", study_id)
+  repos$template_versions$activate(version_id, study_id)
 
   meta <- repos$studies$find_meta("77001", "RDUHT", "A")
   expect_equal(nrow(meta), 1)
@@ -127,15 +133,15 @@ test_that("study/ict/posting round-trips keep canonical column names on postgres
     activity_occurrence_id = 1L, staff_group = 1L,
     stringsAsFactors = FALSE
   )
-  repos$ict_costing$replace_run(ict_df, "77001", "RDUHT", "A")
-  fetched <- repos$ict_costing$find_by_run("77001", "RDUHT", "A")
+  repos$ict_costing$replace_run(ict_df, "77001", "RDUHT", "A", version_id)
+  fetched <- repos$ict_costing$find_by_run("77001", "RDUHT", "A", version_id)
   expect_identical(
     names(fetched),
     RIDS_CANONICAL_COLUMNS$ict_costing_tbl
   )
   expect_identical(fetched$Activity_Name[[1]], "Blood Test")
 
-  visit <- repos$ict_costing$visit_lookup("77001", "RDUHT", "A")
+  visit <- repos$ict_costing$visit_lookup("77001", "RDUHT", "A", version_id)
   expect_true(all(c("Study", "Study_Arm", "Visit_Label", "Visit_Number") %in% names(visit)))
 
   pl_df <- data.frame(
@@ -145,9 +151,9 @@ test_that("study/ict/posting round-trips keep canonical column names on postgres
     Visit_Label = "Screening", staff_group = 1L,
     stringsAsFactors = FALSE
   )
-  repos$posting_lines$replace_for_run(pl_df, "77001", "RDUHT", "A")
-  expect_equal(repos$posting_lines$count_for_run("77001", "RDUHT", "A"), 1)
-  pl_back <- repos$posting_lines$find_by_run("77001", "RDUHT", "A")
+  repos$posting_lines$replace_for_run(pl_df, "77001", "RDUHT", "A", version_id)
+  expect_equal(repos$posting_lines$count_for_run("77001", "RDUHT", "A", version_id), 1)
+  pl_back <- repos$posting_lines$find_by_run("77001", "RDUHT", "A", version_id)
   expect_true(all(c("Study_Arm", "Activity", "Visit", "Visit_Label") %in% names(pl_back)))
 
   # settings + rules reads
@@ -169,6 +175,19 @@ test_that("stage A ICT persistence uses repositories in postgres mode", {
   source_from_root("R/utils/pipeline_fixed.r")
   assign("STORAGE_MODE", "postgres", envir = .GlobalEnv)
 
+  repos$studies$insert_meta(
+    cpms_id = "88001", study_site = "RDUHT", scenario_id = "A",
+    edge_id = "E2", study_name = "PG Stage A", notes = NA_character_,
+    uploaded_by = "pg.user", original_filename = "stage-a.xlsx",
+    saved_file_path = "/tmp/stage-a.xlsx", speciality_id = 1L,
+    mff_split_enabled = FALSE, mff_split_pct = 0
+  )
+  study_id <- repos$studies$last_upload_id()
+  version_id <- repos$template_versions$create(
+    study_id, "baseline", original_filename = "stage-a.xlsx",
+    saved_file_path = "/tmp/stage-a.xlsx"
+  )
+
   ict_df <- data.frame(
     CPMS_ID = "88001", study_site = "RDUHT", scenario_id = "A",
     Study = "PG Stage A", Visit_Number = "V1", Study_Arm = "Arm A",
@@ -178,10 +197,10 @@ test_that("stage A ICT persistence uses repositories in postgres mode", {
   )
 
   expect_no_error(
-    persist_ict_to_duckdb("/definitely/not/a/duckdb/file.duckdb", ict_df)
+    persist_ict_to_duckdb("/definitely/not/a/duckdb/file.duckdb", ict_df, version_id)
   )
 
-  fetched <- repos$ict_costing$find_by_run("88001", "RDUHT", "A")
+  fetched <- repos$ict_costing$find_by_run("88001", "RDUHT", "A", version_id)
   expect_equal(nrow(fetched), 1)
   expect_identical(fetched$Activity_Name[[1]], "Blood Test")
 })

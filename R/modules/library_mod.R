@@ -131,15 +131,11 @@
 
 libraryUI <- function(id) {
   ns <- NS(id)
-  tagList(
+  div(
+    class = "rids-page rids-library-page",
+    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Portfolio"), h1("Study library"), p("Find, review and continue work across all studies.")), div(class = "rids-page-mark", icon("book-open"))),
     div(
-      style = paste(
-        "display: grid;",
-        "grid-template-columns: minmax(220px, 1.8fr) repeat(4, minmax(150px, 1fr)) auto;",
-        "gap: 0.75rem;",
-        "align-items: start;",
-        "padding: 1rem 1rem 0;"
-      ),
+      class = "rids-filter-bar library-filter-bar",
       textInput(ns("search"), "Search studies", placeholder = "Study name, CPMS ID, or EDGE"),
       selectInput(ns("site_filter"), "Study site", choices = c("All sites" = "")),
       selectInput(ns("speciality_filter"), "Speciality", choices = c("All specialities" = "")),
@@ -155,7 +151,7 @@ libraryUI <- function(id) {
         selected = "newest"
       ),
       div(
-        style = "padding-top: 30px;",
+        class = "rids-filter-action",
         actionButton(ns("clear_filters"), "Clear filters", class = "btn btn-default")
       )
     ),

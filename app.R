@@ -16,12 +16,10 @@ ui <- tagList(
     dark = NULL,
     help = NULL,
     header = dashboardHeader(title = dashboardBrand(title = span(
-      style = "font-weight: 700; color: #1d2a36;",
-      "RIDS ",
-      span(
-        style = "font-size: 0.7rem; color: #697786; font-weight: 400;",
-        APP_VERSION_LABEL
-      )
+      class = "rids-header-brand",
+      span(class = "rids-header-brand-mark", icon("layer-group")),
+      span("RIDS"),
+      span(class = "rids-header-version", APP_VERSION_LABEL)
     )), rightUi = uiOutput("user_badge")),
     sidebar = dashboardSidebar(
       skin = "light",
@@ -40,19 +38,7 @@ ui <- tagList(
       loginUI("login"),
       appUI("app"),
       div(
-        style = paste(
-          "position: fixed;",
-          "bottom: 0.5rem;",
-          "left: 50%;",
-          "transform: translateX(-50%);",
-          "padding: 0.3rem 0.8rem;",
-          "font-size: 0.72rem;",
-          "color: #aaa;",
-          "background: rgba(255,255,255,0.85);",
-          "border: 1px solid #eee;",
-          "border-radius: 12px;",
-          "z-index: 1040;"
-        ),
+        class = "rids-build-badge",
         paste0(APP_VERSION_LABEL, " · last updated ", APP_LAST_UPDATED)
       )
     ) 
@@ -103,14 +89,15 @@ server <- function(input, output, session) {
     req(auth_state$logged_in)
     
     div(
-      style = "display: flex; align-items: center; gap: 0.5rem; padding: 0 1rem;",
+      class = "rids-user-badge",
       span(
-        style = "font-size: 0.85rem; font-weight: 600; color: #1d2a36;",
+        class = "rids-user-name",
         auth_state$name %||% auth_state$username
       ),
       span(
+        class = paste("rids-role-chip", if (isTRUE(is_admin(auth_state$role))) "is-admin" else ""),
         style = sprintf(
-          "background: %s; color: %s; padding: 0.2rem 0.6rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600;",
+          "background: %s; color: %s;",
           if (isTRUE(is_admin(auth_state$role))) "#e8f4fd" else "#f0f4f8",
           if (isTRUE(is_admin(auth_state$role))) "#1f5f8b" else "#6c757d"
         ),

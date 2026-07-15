@@ -49,6 +49,15 @@ sidebarServer <- function(id, auth_state, parent_session, current_step) {
         div(
           class = "rids-sidebar-shell",
           div(
+            class = "rids-sidebar-context",
+            div(class = "rids-sidebar-context-mark", icon("layer-group")),
+            div(
+              class = "rids-sidebar-context-copy",
+              span(class = "rids-sidebar-context-kicker", "Workspace"),
+              strong("Research operations")
+            )
+          ),
+          div(
             class = "rids-sidebar-top",
             actionButton(
               ns('new_ict'),

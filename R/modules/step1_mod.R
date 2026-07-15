@@ -1,55 +1,149 @@
 step1_UI <- function(id) {
   ns <- NS(id)
-    bs4Card(
-      title  = "Upload ICT Workbook",
-      width  = 6,
-      status = "primary",
-      solidHeader = FALSE,
-      selectInput(ns('scenario'), 'Select Scenario', choices = c("A", "B")),
-      selectInput(
-        ns("study_site"),
-        "Study Site",
-        choices = c("Select site..." = "", "RDUHT", "NDDHT"),
-        selected = ""
+  div(
+    class = "step1-page",
+    div(
+      class = "step1-page-header",
+      div(
+        div(class = "step1-eyebrow", "ICT processing · Step 1 of 4"),
+        h1("Set up your study"),
+        p("Add the study details and source workbook needed to begin costing.")
       ),
-      selectInput(ns('speciality_id'), 'Clinical speciality', choices = NULL),
-      textInput(ns('edge_id'), 'EDGE ID'),
-      textInput(ns('study_name'), 'Study Name'),
-      checkboxInput(
-        ns("mff_split_enabled"),
-        "Use new MFF split",
-        value = TRUE
-      ),
-      numericInput(
-        ns("mff_split_pct"),
-        "MFF split percentage",
-        value = 0.25,
-        min = 0,
-        max = 1,
-        step = 0.01
-      ),
-      checkboxInput(
-        ns("include_screening_failure"),
-        "Generate Screening Failure EDGE templates",
-        value = FALSE
-      ),
-      shinyjs::hidden(
+      div(
+        class = "step1-header-mark",
+        icon("file-excel")
+      )
+    ),
+    div(
+      class = "step1-layout",
+      div(
+        class = "step1-main",
         div(
-          id = ns("screening_failure_arm_wrap"),
-          selectInput(
-            ns("screening_failure_arm"),
-            "Screening Failure arm",
-            choices = c("No eligible study arm found" = ""),
-            selected = ""
+          class = "step1-surface",
+          div(
+            class = "step1-section-heading",
+            div(class = "step1-section-icon", icon("clipboard-list")),
+            div(h2("Study details"), p("Core identifiers used throughout the workflow."))
+          ),
+          div(
+            class = "step1-form-grid",
+            div(class = "step1-field", selectInput(ns('scenario'), 'Scenario', choices = c("A", "B"))),
+            div(
+              class = "step1-field",
+              selectInput(
+                ns("study_site"),
+                "Study site",
+                choices = c("Select site..." = "", "RDUHT", "NDDHT"),
+                selected = ""
+              )
+            ),
+            div(class = "step1-field step1-field-wide", selectInput(ns('speciality_id'), 'Clinical speciality', choices = NULL)),
+            div(class = "step1-field", textInput(ns('edge_id'), 'EDGE ID')),
+            div(class = "step1-field", textInput(ns('study_name'), 'Study name'))
+          )
+        ),
+        div(
+          class = "step1-surface",
+          div(
+            class = "step1-section-heading",
+            div(class = "step1-section-icon", icon("sliders-h")),
+            div(h2("Costing options"), p("Configure optional workbook outputs before processing."))
+          ),
+          div(
+            class = "step1-option-list",
+            div(
+              class = "step1-option-row",
+              div(
+                class = "step1-option-copy",
+                strong("MFF split"),
+                span("Apply the new split percentage to generated costs.")
+              ),
+              div(
+                class = "step1-option-controls",
+                checkboxInput(ns("mff_split_enabled"), "Enabled", value = TRUE),
+                numericInput(
+                  ns("mff_split_pct"),
+                  "Percentage",
+                  value = 0.25,
+                  min = 0,
+                  max = 1,
+                  step = 0.01
+                )
+              )
+            ),
+            div(
+              class = "step1-option-row",
+              div(
+                class = "step1-option-copy",
+                strong("Screening failure templates"),
+                span("Generate additional EDGE templates when an eligible arm is found.")
+              ),
+              checkboxInput(
+                ns("include_screening_failure"),
+                "Generate templates",
+                value = FALSE
+              )
+            ),
+            shinyjs::hidden(
+              div(
+                id = ns("screening_failure_arm_wrap"),
+                class = "step1-reveal-field",
+                selectInput(
+                  ns("screening_failure_arm"),
+                  "Screening failure arm",
+                  choices = c("No eligible study arm found" = ""),
+                  selected = ""
+                )
+              )
+            )
           )
         )
       ),
-    fileInput(ns("upload"), "Choose Excel File",
-              multiple = FALSE,
-              accept = c(".xlsx")),
-    textAreaInput(ns("notes"), "Add upload notes"),
-    actionButton(ns('next_step'), 'Next: Review Costs', class = "pipeline-next-btn"),
-    helpUI(ns("help"))
+      div(
+        class = "step1-side",
+        div(
+          class = "step1-surface step1-upload-surface",
+          div(
+            class = "step1-upload-mark",
+            icon("cloud-upload-alt")
+          ),
+          h2("Upload workbook"),
+          p("Use the completed ICT costing workbook in Excel format."),
+          fileInput(
+            ns("upload"),
+            "Choose Excel file",
+            multiple = FALSE,
+            accept = c(".xlsx")
+          ),
+          div(class = "step1-file-hint", icon("check-circle"), " .xlsx files only")
+        ),
+        div(
+          class = "step1-surface step1-notes-surface",
+          textAreaInput(
+            ns("notes"),
+            "Upload notes",
+            placeholder = "Add context for reviewers (optional)"
+          )
+        )
+      )
+    ),
+    div(
+      class = "step1-action-bar",
+      div(
+        class = "step1-action-copy",
+        icon("shield-alt"),
+        span("Your workbook will be validated before any study data is created.")
+      ),
+      div(
+        class = "step1-actions",
+        helpUI(ns("help")),
+        actionButton(
+          ns('next_step'),
+          label = tagList("Review costs", icon("arrow-right")),
+          class = "pipeline-next-btn step1-next-btn"
+        )
+      )
+    )
   )
 }
 
@@ -292,9 +386,12 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       ###
       # ── Process ──────────────────────────────────────────────────────────
       timestamp     <- format(Sys.time(), "%Y%m%d_%H%M%S")
-      original_name <- input$upload$name
-      saved_name    <- paste0(timestamp, "_", original_name)
-      saved_path    <- file.path(ICT_UPLOAD_DIR, saved_name)
+      original_name <- gsub("[/\\\\]", "_", basename(as.character(input$upload$name)))
+      saved_path    <- tempfile(
+        pattern = paste0(timestamp, "_"),
+        tmpdir = ICT_UPLOAD_DIR,
+        fileext = paste0("_", original_name)
+      )
 
       log_event(
         level = "INFO",
@@ -313,7 +410,7 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       app_log_info("step1", "Workbook processing started")
 
       copy_ok <- tryCatch({
-        file.copy(input$upload$datapath, saved_path, overwrite = TRUE)
+        file.copy(input$upload$datapath, saved_path, overwrite = FALSE)
       }, error = function(e) {
         log_event(
           level = "ERROR",
@@ -368,7 +465,10 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
         return(NULL)
       })
       
-      req(extracted_cpms)
+      if (is.null(extracted_cpms)) {
+        if (file.exists(saved_path)) unlink(saved_path, force = TRUE)
+        return()
+      }
 
       duplicate_exists <- tryCatch({
         rids_repos()$studies$exists_run(
@@ -395,9 +495,13 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
         return(NA)
       })
 
-      req(!is.na(duplicate_exists))
+      if (is.na(duplicate_exists)) {
+        if (file.exists(saved_path)) unlink(saved_path, force = TRUE)
+        return()
+      }
 
       if (isTRUE(duplicate_exists)) {
+        if (file.exists(saved_path)) unlink(saved_path, force = TRUE)
         showNotification(
           paste(
             "This study already exists for CPMS",
@@ -466,6 +570,7 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       })
 
       if (!isTRUE(meta_saved)) {
+        if (file.exists(saved_path)) unlink(saved_path, force = TRUE)
         return()
       }
 
@@ -474,13 +579,50 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       }, error = function(e) {
         NA_integer_
       })
+
+      version_id <- tryCatch({
+        rids_repos()$template_versions$create(
+          study_id = upload_id,
+          version_type = "baseline",
+          uploaded_by = sanitize_text_value(auth_state$username %||% auth_state$name %||% ""),
+          notes = sanitize_text_value(input$notes),
+          original_filename = sanitize_text_value(original_name),
+          saved_file_path = sanitize_text_value(saved_path)
+        )
+      }, error = function(e) {
+        app_log_exception("step1", "Baseline template version save failed", e, list(
+          cpms_id = extracted_cpms,
+          upload_id = upload_id
+        ))
+        cleanup <- tryCatch(
+          delete_study_run(
+            cpms_id = sanitize_text_value(as.character(extracted_cpms)),
+            study_site = sanitize_text_value(input$study_site),
+            scenario_id = sanitize_text_value(input$scenario),
+            con = CON,
+            delete_files = TRUE
+          ),
+          error = function(cleanup_error) cleanup_error
+        )
+        message <- "Failed to create the baseline template version. The upload was rolled back."
+        if (inherits(cleanup, "error")) {
+          message <- "Failed to create the baseline template version and cleanup did not complete. Contact an administrator."
+        }
+        showNotification(message, type = "error", duration = 10)
+        NA_integer_
+      })
+
+      if (is.na(version_id)) return()
+
+      version_number <- rids_repos()$template_versions$find(version_id)$version_number[[1]]
       
       shared_state$processed_ict <- tryCatch({
         process_workbook(
           input_path = saved_path,
           db_path = DB_DIR,
           study_site = input$study_site,
-          scenario_id = input$scenario
+          scenario_id = input$scenario,
+          version_id = version_id
         )
       }, error = function(e) {
         if (handle_fatal_db_error(session, e, "step1", list(
@@ -517,7 +659,26 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
         return(NULL)
       })
       
-      req(shared_state$processed_ict)
+      if (is.null(shared_state$processed_ict)) {
+        cleanup <- tryCatch(
+          delete_study_run(
+            cpms_id = sanitize_text_value(as.character(extracted_cpms)),
+            study_site = sanitize_text_value(input$study_site),
+            scenario_id = sanitize_text_value(input$scenario),
+            con = CON,
+            delete_files = TRUE
+          ),
+          error = function(cleanup_error) cleanup_error
+        )
+        if (inherits(cleanup, "error")) {
+          showNotification(
+            "Workbook processing failed and cleanup did not complete. Contact an administrator.",
+            type = "error",
+            duration = 10
+          )
+        }
+        return()
+      }
 
       processed_candidates <- screening_failure_candidate_sheets(shared_state$processed_ict)
       selected_screening_arm <- resolve_screening_failure_arm(
@@ -550,6 +711,10 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
       
       shared_state$cpms_id          <- extracted_cpms
       shared_state$upload_id        <- upload_id
+      shared_state$template_version_id <- version_id
+      shared_state$template_version_number <- version_number
+      shared_state$template_version_type <- "baseline"
+      shared_state$template_version_effective_date <- NULL
       shared_state$scenario_id      <- input$scenario
       shared_state$study_site       <- input$study_site
       shared_state$include_screening_failure <- isTRUE(input$include_screening_failure)
@@ -572,6 +737,7 @@ step1_Server <- function(id, auth_state, shared_state, current_step) {
         raw_ict         = saved_path,
         timestamp       = timestamp,
         upload_id       = upload_id,
+        version_id      = version_id,
         speciality_id   = sp_id,
         speciality_name = sp_name
       )

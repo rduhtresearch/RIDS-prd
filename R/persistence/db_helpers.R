@@ -55,12 +55,12 @@ rids_dbExecute <- function(con, sql, params = NULL) {
 # are renamed back so application code sees one consistent shape.
 RIDS_CANONICAL_COLUMNS <- list(
   ict_costing_tbl = c(
-    "CPMS_ID", "study_site", "scenario_id", "Study", "Visit_Number",
+    "CPMS_ID", "study_site", "scenario_id", "version_id", "Study", "Visit_Number",
     "Study_Arm", "Arm_Identity", "Visit_Label", "Activity_Name", "ICT_Cost",
     "Contract_Cost", "activity_occurrence_id", "staff_group"
   ),
   posting_lines = c(
-    "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
+    "row_id", "scenario_id", "version_id", "row_category_auto", "calc_tag", "row_category",
     "is_medic", "cpms_id", "study_site", "study_name", "Study_Arm",
     "Activity", "Visit", "posting_line_type_id", "posting_amount",
     "destination_bucket", "destination_entity", "cost_code", "sheet_name",
@@ -70,7 +70,7 @@ RIDS_CANONICAL_COLUMNS <- list(
     "is_residual_row", "adjusted_sum_check", "diff_check", "edge_key"
   ),
   addon_custom_activities = c(
-    "id", "custom_activity_id", "cpms_id", "study_site", "study_name",
+    "id", "custom_activity_id", "cpms_id", "study_site", "study_name", "version_id",
     "scenario_id", "Study_Arm", "Activity", "mode", "slot_num",
     "cost_centre", "amount", "created_by", "created_at"
   )

@@ -56,16 +56,19 @@ resolve_screening_failure_arm <- function(ict, selected_arm = NULL) {
 }
 
 is_itemised_export_row <- function(sheet_name, Study_Arm) {
-  Study_Arm %in% .ITEMISED_EDGE_ARMS | is_screening_failure_sheet(sheet_name)
+  trimws(coalesce(as.character(Study_Arm), "")) %in% .ITEMISED_EDGE_ARMS |
+    is_screening_failure_sheet(sheet_name)
 }
 
 is_itemised_adjustment_row <- function(Study_Arm) {
   # Screening Failure rows are deliberately not included here: they should be
   # scaled against the duplicated visit total, then rendered itemised later.
-  Study_Arm %in% .ITEMISED_EDGE_ARMS
+  trimws(coalesce(as.character(Study_Arm), "")) %in% .ITEMISED_EDGE_ARMS
 }
 
 resolve_edge_template_arm <- function(sheet_name, Study_Arm) {
+  sheet_name <- trimws(coalesce(as.character(sheet_name), ""))
+  Study_Arm <- trimws(coalesce(as.character(Study_Arm), ""))
   if_else(is_itemised_export_row(sheet_name, Study_Arm), sheet_name, Study_Arm)
 }
 
@@ -133,6 +136,14 @@ duplicate_screening_failure_sheets <- function(ict,
   # template build like any other exportable sheet.
   screening_rows <- df |>
     dplyr::filter(Visit == first_visit)
+
+  if ("Study_Arm" %in% names(screening_rows)) {
+    screening_rows <- screening_rows |>
+      dplyr::filter(
+        trimws(coalesce(as.character(Study_Arm), "")) == trimws(target_arm) |
+          trimws(coalesce(as.character(Study_Arm), "")) == "SSP"
+      )
+  }
 
   if (nrow(screening_rows) == 0) {
     return(out)

@@ -51,6 +51,45 @@ suppressPackageStartupMessages({
   )
 }
 
+.write_ua_workflow_fixture <- function(path) {
+  make_arm_sheet <- function(ua_cost, include_ssp = FALSE) {
+    rows <- list(
+      c("Study", "Study A"),
+      c("Study Id", "CP-E2E"),
+      c("Activity", "Activity Type", "Department", "Cost Type", "Staff Role",
+        "Time Required", "Activity Cost", "Visit One", "Total Activity Cost", "Total"),
+      c("Visit Summary", "Visit", "R&D", "Research", "Nurse", "30", "100", "1", "100", "100"),
+      c("Unscheduled / Itemised Activities", rep(NA_character_, 9)),
+      c("Ad hoc", "Investigation", "Lab", "Research", "Nurse", "20",
+        as.character(ua_cost), "1", as.character(ua_cost), as.character(ua_cost))
+    )
+    if (include_ssp) {
+      rows <- append(rows, list(
+        c("Scheduled / Some Participants", rep(NA_character_, 9)),
+        c("Questionnaire", "Visit", "R&D", "Research", "Nurse", "10", "25", "1", "25", "25")
+      ))
+    }
+    matrix_rows <- lapply(rows, function(row) {
+      length(row) <- 10L
+      row
+    })
+    as.data.frame(do.call(rbind, matrix_rows), stringsAsFactors = FALSE)
+  }
+
+  setup_sheet <- make_arm_sheet(50, FALSE)[1:4, ]
+  setup_sheet[4, 1] <- "Site setup"
+
+  workbook <- openxlsx::createWorkbook()
+  openxlsx::addWorksheet(workbook, " Arm A ")
+  openxlsx::writeData(workbook, " Arm A ", make_arm_sheet(11, TRUE), colNames = FALSE)
+  openxlsx::addWorksheet(workbook, "Arm B")
+  openxlsx::writeData(workbook, "Arm B", make_arm_sheet(22, FALSE), colNames = FALSE)
+  openxlsx::addWorksheet(workbook, "Setup & Closedown")
+  openxlsx::writeData(workbook, "Setup & Closedown", setup_sheet, colNames = FALSE)
+  openxlsx::saveWorkbook(workbook, path, overwrite = TRUE)
+  path
+}
+
 run_contract_cost_source_of_truth_tests <- function() {
   cat("\n=== contract cost source-of-truth tests ===\n\n")
   .passed <<- 0L
@@ -63,6 +102,7 @@ run_contract_cost_source_of_truth_tests <- function() {
   source("R/utils/assign_edge_keys.R")
   source("R/utils/build_template.r")
   source("R/utils/pipeline_fixed.r")
+  source("R/utils/add_study_arm.r")
 
   db_path <- tempfile(fileext = ".duckdb")
   con <- dbConnect(duckdb::duckdb(), dbdir = db_path)
@@ -130,6 +170,7 @@ run_contract_cost_source_of_truth_tests <- function() {
 
   dbExecute(con, "ALTER TABLE ict_costing_tbl ADD COLUMN Arm_Identity VARCHAR")
   dbExecute(con, "UPDATE ict_costing_tbl SET Arm_Identity = Study_Arm")
+  dbExecute(con, "UPDATE ict_costing_tbl SET Arm_Identity = 'Arm A' WHERE Study_Arm = 'SSP'")
   dbExecute(con, "
     INSERT INTO ict_costing_tbl (
       CPMS_ID, study_site, scenario_id, Study, Visit_Number, Study_Arm, Visit_Label,
@@ -137,7 +178,8 @@ run_contract_cost_source_of_truth_tests <- function() {
       Arm_Identity
     ) VALUES
       ('CP1', 'RDUHT', 'A', 'Study A', 'VISIT - 001', 'UA', 'Unscheduled', 'Extra Bloods', 10, 111, 'UA-A-1', 1, 'Arm A'),
-      ('CP1', 'RDUHT', 'A', 'Study A', 'VISIT - 001', 'UA', 'Unscheduled', 'Extra Bloods', 20, 222, 'UA-B-1', 1, 'Arm B')
+      ('CP1', 'RDUHT', 'A', 'Study A', 'VISIT - 001', 'UA', 'Unscheduled', 'Extra Bloods', 20, 222, 'UA-B-1', 1, 'Arm B'),
+      ('CP1', 'RDUHT', 'A', 'Study A', 'VISIT - 001', 'SSP', 'Screening', 'Blood Test', 35, 35, 'SSP-B-1', 2, 'Arm B')
   ")
 
   cat("[ join_ict_costs ]\n")
@@ -220,6 +262,104 @@ run_contract_cost_source_of_truth_tests <- function() {
   )
   .expect("UA contract cost join uses Arm_Identity rather than generic Study_Arm",
           identical(joined_ua_arm$contract_cost[[1]], 222))
+
+  joined_multi_arm_ua <- join_ict_costs(
+    tibble(
+      cpms_id = c("CP1", "CP1"),
+      study_site = c("RDUHT", "RDUHT"),
+      scenario_id = c("A", "A"),
+      Visit = c("VISIT - 001", "VISIT - 001"),
+      Study_Arm = c("UA", "UA"),
+      Arm_Identity = c("Arm A", "Arm B"),
+      Activity = c("Extra Bloods", "Extra Bloods"),
+      staff_group = c(1L, 1L)
+    ),
+    db_path
+  )
+  .expect("multi-arm UA cost join does not fan out posting rows",
+          nrow(joined_multi_arm_ua) == 2L)
+  .expect("multi-arm UA join preserves each arm's saved cost",
+          identical(joined_multi_arm_ua$contract_cost, c(111, 222)))
+
+  joined_multi_arm_ssp <- join_ict_costs(
+    tibble(
+      cpms_id = c("CP1", "CP1"), study_site = c("RDUHT", "RDUHT"),
+      scenario_id = c("A", "A"), Visit = c("VISIT - 001", "VISIT - 001"),
+      Study_Arm = c("SSP", "SSP"), Arm_Identity = c("Arm A", "Arm B"),
+      Activity = c("Blood Test", "Blood Test"), staff_group = c(2L, 2L)
+    ),
+    db_path
+  )
+  .expect("SSP cost joins retain the originating parent arm without fan-out",
+          nrow(joined_multi_arm_ssp) == 2L &&
+            identical(joined_multi_arm_ssp$contract_cost, c(25, 35)))
+
+  versioned_db_path <- tempfile(fileext = ".duckdb")
+  versioned_con <- dbConnect(duckdb::duckdb(), dbdir = versioned_db_path)
+  dbExecute(versioned_con, "
+    CREATE TABLE ict_costing_tbl (
+      CPMS_ID VARCHAR, study_site VARCHAR, scenario_id VARCHAR, version_id INTEGER,
+      Study VARCHAR, Visit_Number VARCHAR, Study_Arm VARCHAR, Arm_Identity VARCHAR,
+      Visit_Label VARCHAR, Activity_Name VARCHAR, ICT_Cost DOUBLE, Contract_Cost DOUBLE,
+      activity_occurrence_id INTEGER, staff_group INTEGER
+    )
+  ")
+  dbExecute(versioned_con, "
+    INSERT INTO ict_costing_tbl VALUES
+      ('CPV', 'SITE', 'A', 1, 'Study V', 'VISIT - 001', 'UA', 'Arm A',
+       'Unscheduled', 'Ad hoc', 10, 101, 1, 1),
+      ('CPV', 'SITE', 'A', 2, 'Study V', 'VISIT - 001', 'UA', 'Arm A',
+       'Unscheduled', 'Ad hoc', 20, 202, 1, 1)
+  ")
+  dbDisconnect(versioned_con, shutdown = TRUE)
+
+  versioned_input <- tibble(
+    cpms_id = "CPV", study_site = "SITE", scenario_id = "A", version_id = 2L,
+    Visit = "VISIT - 001", Study_Arm = "UA", Arm_Identity = "Arm A",
+    Activity = "Ad hoc", staff_group = 1L
+  )
+  versioned_join <- join_ict_costs(versioned_input, versioned_db_path)
+  .expect("versioned cost join reads only the selected template version",
+          nrow(versioned_join) == 1L && identical(versioned_join$contract_cost[[1]], 202))
+
+  versioned_con <- dbConnect(duckdb::duckdb(), dbdir = versioned_db_path)
+  dbExecute(versioned_con, "
+    INSERT INTO ict_costing_tbl VALUES
+      ('CPV', 'SITE', 'A', 2, 'Study V', 'VISIT - 001', 'UA', 'Arm A',
+       'Unscheduled', 'Ad hoc', 30, 203, 2, 1)
+  ")
+  dbDisconnect(versioned_con, shutdown = TRUE)
+
+  repeated_occurrence_join <- join_ict_costs(
+    bind_rows(
+      versioned_input %>% mutate(activity_occurrence_id = 1L),
+      versioned_input %>% mutate(activity_occurrence_id = 2L)
+    ),
+    versioned_db_path
+  )
+  .expect("repeated activity occurrences join one-to-one using occurrence ID",
+          nrow(repeated_occurrence_join) == 2L &&
+            identical(repeated_occurrence_join$contract_cost, c(202, 203)))
+
+  mixed_occurrence_join <- join_ict_costs(
+    bind_rows(
+      repeated_occurrence_join %>% select(-contract_cost),
+      versioned_input %>% mutate(Activity = "MFF Summary", activity_occurrence_id = NA_integer_)
+    ),
+    versioned_db_path
+  )
+  .expect("rows without occurrence IDs do not disable occurrence matching for activity rows",
+          nrow(mixed_occurrence_join) == 3L &&
+            identical(mixed_occurrence_join$contract_cost[1:2], c(202, 203)))
+
+  duplicate_join_error <- tryCatch(
+    join_ict_costs(versioned_input, versioned_db_path),
+    error = identity
+  )
+  .expect("duplicate cost keys are rejected before they fan out posting rows",
+          inherits(duplicate_join_error, "error") &&
+            grepl("would fan out", conditionMessage(duplicate_join_error)))
+  unlink(versioned_db_path)
 
   cat("\n[ persist_ict_to_duckdb ]\n")
   scoped_db_path <- tempfile(fileext = ".duckdb")
@@ -313,11 +453,13 @@ run_contract_cost_source_of_truth_tests <- function() {
   .expect("whole-pound saved values remain whole-pound totals",
           identical(round(sum(adjusted_rounded$adjusted_amount), 2), 123))
 
-  adjusted_missing <- adjust_posting_lines(.make_adjust_rows(NA_real_))
-  .expect("missing contract cost propagates explicitly",
-          all(is.na(adjusted_missing$contract_price)) &&
-            all(is.na(adjusted_missing$adjusted_amount)) &&
-            all(is.na(adjusted_missing$diff_check)))
+  missing_cost_error <- tryCatch(
+    adjust_posting_lines(.make_adjust_rows(NA_real_)),
+    error = identity
+  )
+  .expect("missing contract costs stop Step 4 before zero-value templates are built",
+          inherits(missing_cost_error, "error") &&
+            grepl("did not match a saved Step 2 contract cost", conditionMessage(missing_cost_error)))
 
   adjusted_ssp <- adjust_posting_lines(.make_ssp_rows())
   ssp_rows <- adjusted_ssp %>% filter(Study_Arm == "SSP") %>% arrange(row_id)
@@ -325,6 +467,134 @@ run_contract_cost_source_of_truth_tests <- function() {
           isTRUE(all.equal(unname(ssp_rows$contract_price), c(25, 40, 35))))
   .expect("SSP rows adjust to their own saved totals",
           isTRUE(all.equal(unname(round(ssp_rows$adjusted_amount, 2)), c(25, 40, 35))))
+
+  ua_adjust_input <- tibble(
+    row_id = c(21L, 22L),
+    Activity = c("Extra Bloods", "Extra Bloods"),
+    staff_group = c(1L, 1L),
+    scenario_id = c("A", "A"),
+    sheet_name = c("Unscheduled Activities", "Unscheduled Activities"),
+    Study_Arm = c("UA", "UA"),
+    Arm_Identity = c("Arm A", "Arm B"),
+    Visit = c("VISIT - 001", "VISIT - 001"),
+    posting_line_type_id = c("DIRECT", "DIRECT"),
+    posting_amount = c(10, 10),
+    contract_cost = c(111.11, 222)
+  )
+  adjusted_ua <- adjust_posting_lines(ua_adjust_input) %>% arrange(Arm_Identity)
+  .expect("UA adjustments retain separate arm-specific pence targets",
+          identical(adjusted_ua$contract_price, c(111.11, 222)))
+  .expect("UA rows adjust independently for each arm",
+          identical(adjusted_ua$adjusted_amount, c(111.11, 222)))
+
+  generic_ua_error <- tryCatch(
+    adjust_posting_lines(ua_adjust_input %>% mutate(Arm_Identity = "UA")),
+    error = identity
+  )
+  .expect("generic UA identities are rejected with a reprocessing instruction",
+          inherits(generic_ua_error, "error") &&
+            grepl("source-arm identity is missing", conditionMessage(generic_ua_error)))
+
+  sc_adjusted <- adjust_posting_lines(tibble(
+    row_id = c(31L, 31L),
+    Activity = c("Site setup", "Site setup"),
+    staff_group = c(1L, 1L),
+    scenario_id = c("A", "A"),
+    sheet_name = c("Setup & Closedown", "Setup & Closedown"),
+    Study_Arm = c("SC", "SC"),
+    Arm_Identity = c("Arm A", "Arm B"),
+    Visit = c("VISIT - 001", "VISIT - 001"),
+    posting_line_type_id = c("DIRECT", "INDIRECT"),
+    posting_amount = c(60, 40),
+    contract_cost = c(150, 150)
+  ))
+  .expect("Setup & Closedown remains one activity adjustment group",
+          identical(round(sum(sc_adjusted$adjusted_amount), 2), 150))
+
+  cat("\n[ workbook arm identity ]\n")
+  special_lookup_input <- tibble(
+    Activity = c("Extra Bloods", "Site setup"),
+    Activity.Cost = c(10, 20),
+    `Visit One` = c(1, 1),
+    Total.Activity.Cost = c(10, 20),
+    Total = c(10, 20),
+    Flag = c("Unscheduled / Itemised Activities", "Setup & Closedown"),
+    SheetName = c("Arm A", "Arm A"),
+    staff_group = c(1L, 1L)
+  )
+  special_lookup <- build_ua_ssp_lookup_from_sheet(
+    special_lookup_input, "Study A", "CP1"
+  ) %>% arrange(Study_Arm)
+  .expect("ingestion uses source identity for UA and canonical identity for SC",
+          identical(special_lookup$Arm_Identity, c("SC", "Arm A")))
+  .expect("ingestion keeps generic UA and SC routing arms",
+          identical(special_lookup$Study_Arm, c("SC", "UA")))
+
+  trimmed_arms <- add_study_arm(list(
+    ` Treatment Arm ` = tibble(
+      Flag = c("Scheduled / All Participants", "Scheduled / Some Participants"),
+      SheetName = c(" Treatment Arm ", " Treatment Arm ")
+    )
+  ))[[1]]
+  .expect("study-arm assignment trims source sheet names",
+          identical(trimmed_arms$Study_Arm, c("Treatment Arm", "SSP")))
+
+  cat("\n[ end-to-end workbook workflow ]\n")
+  fixture_path <- .write_ua_workflow_fixture(tempfile(fileext = ".xlsx"))
+  fixture_db <- tempfile(fileext = ".duckdb")
+  fixture_con <- dbConnect(duckdb::duckdb(), dbdir = fixture_db)
+  dbExecute(fixture_con, "
+    CREATE TABLE ict_costing_tbl (
+      CPMS_ID VARCHAR, study_site VARCHAR, scenario_id VARCHAR, version_id INTEGER,
+      Study VARCHAR, Visit_Number VARCHAR, Study_Arm VARCHAR, Arm_Identity VARCHAR,
+      Visit_Label VARCHAR, Activity_Name VARCHAR, ICT_Cost DOUBLE, Contract_Cost DOUBLE,
+      activity_occurrence_id INTEGER, staff_group INTEGER
+    )
+  ")
+  dbDisconnect(fixture_con, shutdown = TRUE)
+
+  if (!exists("app_log_info", mode = "function")) {
+    assign("app_log_info", function(...) invisible(NULL), envir = .GlobalEnv)
+  }
+  fixture_processed <- process_workbook(
+    fixture_path, db_path = fixture_db, study_site = "SITE", scenario_id = "A", version_id = 1L
+  )
+  fixture_con <- dbConnect(duckdb::duckdb(), dbdir = fixture_db)
+  fixture_repo <- ict_costing_repository(fixture_con)
+  fixture_costs <- fixture_repo$find_by_run("CP-E2E", "SITE", "A", 1L)
+  fixture_costs$Contract_Cost <- fixture_costs$ICT_Cost
+  fixture_repo$replace_run(fixture_costs, "CP-E2E", "SITE", "A", 1L)
+  dbDisconnect(fixture_con, shutdown = TRUE)
+
+  fixture_prepared <- prepare_posting_input(
+    fixture_processed, scenario_id = "A", ict_db_path = fixture_db
+  ) %>%
+    filter(Study_Arm %in% c("UA", "SC", "SSP"))
+  fixture_postings <- fixture_prepared %>%
+    mutate(
+      posting_line_type_id = "DIRECT",
+      posting_amount = as.numeric(Activity.Cost),
+      destination_bucket = "DEST_RD",
+      destination_entity = "R&D",
+      cost_code = NA_character_
+    )
+  fixture_adjusted <- assign_edge_keys(adjust_posting_lines(fixture_postings))
+  fixture_templates <- build_all_edge_templates(
+    fixture_adjusted,
+    visit_lookup = fixture_costs %>%
+      distinct(Study, Study_Arm, Visit_Label, Visit_Number),
+    edge_id = "EDGE-E2E"
+  )
+  .expect("workbook workflow exports one UA template per source arm with exact costs",
+          identical(fixture_templates[["UA - Arm A"]]$`Default Cost`, 11) &&
+            identical(fixture_templates[["UA - Arm B"]]$`Default Cost`, 22))
+  .expect("workbook workflow retains the non-zero Setup cost",
+          identical(fixture_templates[["Setup & Closedown"]]$`Default Cost`, 100))
+  .expect("workbook workflow routes SSP into its trimmed parent arm",
+          "Arm A" %in% names(fixture_templates) &&
+            !("SSP" %in% names(fixture_templates)) &&
+            identical(fixture_templates[["Arm A"]]$`Default Cost`, 25))
+  unlink(c(fixture_path, fixture_db))
 
   cat("\n[ template_build_main alignment ]\n")
   adjusted_template <- adjust_postings(.make_adjust_rows(123.45), c("Study_Arm", "Visit", "scenario_id"))
@@ -334,6 +604,46 @@ run_contract_cost_source_of_truth_tests <- function() {
           identical(round(sum(adjusted_template$adjusted_amount), 2), 123.45))
 
   cat("\n[ active EDGE template build ]\n")
+
+  ua_keyed <- assign_edge_keys(adjusted_ua %>% mutate(
+    Department = "Pathology",
+    `Staff.Role` = "Nurse",
+    study_name = "Study A",
+    cpms_id = "CP1"
+  ))
+  ua_template <- build_all_edge_templates(
+    ua_keyed,
+    visit_lookup = tibble(
+      Study = "Study A",
+      Study_Arm = "Arm A",
+      Visit_Label = "Screening",
+      Visit_Number = "VISIT - 001"
+    ),
+    edge_id = "EDGE-PROJ-1"
+  )
+  .expect("UA Step 4 templates retain distinct arm-specific costs",
+          identical(ua_template[["UA - Arm A"]]$`Default Cost`, 111.11) &&
+            identical(ua_template[["UA - Arm B"]]$`Default Cost`, 222))
+
+  sc_keyed <- assign_edge_keys(sc_adjusted %>% mutate(
+    Department = "Research & Development",
+    `Staff.Role` = "Administrator",
+    study_name = "Study A",
+    cpms_id = "CP1"
+  ))
+  sc_template <- build_all_edge_templates(
+    sc_keyed,
+    visit_lookup = tibble(
+      Study = "Study A",
+      Study_Arm = "SC",
+      Visit_Label = "Setup",
+      Visit_Number = "VISIT - 001"
+    ),
+    edge_id = "EDGE-PROJ-1"
+  )
+  .expect("Setup & Closedown template retains its saved default cost",
+          identical(sc_template[["Setup & Closedown"]]$`Default Cost`, 150))
+
   ssp_keyed <- assign_edge_keys(adjusted_ssp)
   ssp_template <- build_all_edge_templates(
     ssp_keyed,
@@ -357,11 +667,32 @@ run_contract_cost_source_of_truth_tests <- function() {
           nrow(ssp_item_rows_built) == 3L)
   .expect("merged SSP rows include the item names",
           all(grepl("Blood Test|ECG", ssp_item_rows_built$`Cost Item Description`)))
+  .expect("main arm SSP rows retain their exact adjusted default costs",
+          identical(ssp_item_rows_built$`Default Cost`, c(25, 35, 40)))
+  .expect("main arm SSP descriptions are visibly prefixed",
+          all(grepl("^\\[SSP\\] ", ssp_item_rows_built$`Cost Item Description`)))
   .expect("SSP rows do not duplicate the visit prefix",
           !any(grepl("^VISIT - 001 - VISIT - 001", ssp_item_rows_built$`Cost Item Description`)))
   .expect("non-SSP scheduled rows still roll up by visit",
           nrow(scheduled_rows_built) == 1L &&
             identical(scheduled_rows_built$`Default Cost`[[1]], 200))
+
+  standalone_ssp_error <- tryCatch(
+    build_all_edge_templates(
+      assign_edge_keys(.make_ssp_rows() %>%
+        filter(Study_Arm == "SSP") %>%
+        mutate(sheet_name = " SSP ")),
+      visit_lookup = tibble(
+        Study = "Study A", Study_Arm = "SSP", Visit_Label = "Screening",
+        Visit_Number = "VISIT - 001"
+      ),
+      edge_id = "EDGE-PROJ-1"
+    ),
+    error = identity
+  )
+  .expect("standalone SSP templates are rejected after name normalization",
+          inherits(standalone_ssp_error, "error") &&
+            grepl("standalone SSP template is not valid", conditionMessage(standalone_ssp_error)))
   .expect("main arm rows do not repeat a visit-only label",
           identical(
             build_edge_template_main(tibble(
@@ -503,6 +834,7 @@ run_contract_cost_source_of_truth_tests <- function() {
   screening_source <- list(
     `Arm A` = tibble(
       Study_Arm = c("Arm A", "Arm A", "SSP"),
+      Arm_Identity = c("Arm A", "Arm A", "Arm A"),
       Visit = c("VISIT - 001", "VISIT - 002", "VISIT - 001"),
       Visit_Label = c("Screening", "Follow-up", "Screening"),
       Activity = c("Visit Summary", "Visit Summary", "Blood Test"),
@@ -517,6 +849,7 @@ run_contract_cost_source_of_truth_tests <- function() {
     ),
     `Arm B` = tibble(
       Study_Arm = c("Arm B", "Arm B"),
+      Arm_Identity = c("Arm B", "Arm B"),
       Visit = c("VISIT - 001", "VISIT - 003"),
       Visit_Label = c("Baseline", "Visit 3"),
       Activity = c("Visit Summary", "Visit Summary"),
@@ -531,6 +864,7 @@ run_contract_cost_source_of_truth_tests <- function() {
     ),
     `Unscheduled Activities` = tibble(
       Study_Arm = "UA",
+      Arm_Identity = "Arm A",
       Visit = "VISIT - 001",
       Visit_Label = "Screening",
       Activity = "Ad hoc",

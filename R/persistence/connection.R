@@ -16,6 +16,7 @@ build_repositories <- function(con) {
     sessions = session_repository(con),
     auth_audit = auth_audit_repository(con),
     studies = study_repository(con),
+    template_versions = template_version_repository(con),
     ict_costing = ict_costing_repository(con),
     posting_lines = posting_line_repository(con),
     rules = rules_repository(con),

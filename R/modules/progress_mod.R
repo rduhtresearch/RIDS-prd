@@ -3,7 +3,7 @@ progressUI <- function(id) {
   uiOutput(ns("progress_bar"))
 }
 
-progressServer <- function(id, current_step) {
+progressServer <- function(id, current_step, shared_state) {
   moduleServer(id, function(input, output, session) {
     
     steps <- list(
@@ -21,44 +21,76 @@ progressServer <- function(id, current_step) {
       }
       
       
+      metadata_value <- function(value) {
+        if (is.null(value) || length(value) == 0) {
+          return(NULL)
+        }
+
+        value <- trimws(as.character(value[[1]]))
+        if (is.na(value) || !nzchar(value)) NULL else value
+      }
+
+      metadata <- list(
+        Study = metadata_value(shared_state$study_name),
+        Scenario = metadata_value(shared_state$scenario_id),
+        `Study Site` = metadata_value(shared_state$study_site),
+        `CPMS ID` = metadata_value(shared_state$cpms_id)
+      )
+      metadata <- metadata[!vapply(metadata, is.null, logical(1))]
+
       div(
-        style = "display: flex; align-items: center; justify-content: center; padding: 1rem 0 0.5rem; gap: 0;",
-        lapply(seq_along(steps), function(i) {
-          step     <- steps[[i]]
-          is_current  <- !is.null(current) && current == step$id
-          is_complete <- !is.null(current) && which(sapply(steps, `[[`, "id") == current) > i
-          
-          circle_bg    <- if (is_complete) "#28a745" else if (is_current) "#1f5f8b" else "#dee2e6"
-          circle_color <- if (is_complete || is_current) "#ffffff" else "#6c757d"
-          label_color  <- if (is_current) "#1d2a36" else "#6c757d"
-          label_weight <- if (is_current) "700" else "400"
-          circle_content <- if (is_complete) "✓" else as.character(i)
-          
-          tagList(
-            div(
-              style = "display: flex; flex-direction: column; align-items: center; min-width: 80px;",
-              div(
-                style = sprintf(
-                  "width: 2rem; height: 2rem; border-radius: 50%%; background: %s; color: %s; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem;",
-                  circle_bg, circle_color
-                ),
-                circle_content
-              ),
-              div(
-                style = sprintf("margin-top: 0.4rem; font-size: 0.8rem; color: %s; font-weight: %s;", label_color, label_weight),
-                step$label
-              )
-            ),
-            if (i < length(steps)) {
-              div(
-                style = sprintf(
-                  "flex: 1; height: 2px; background: %s; margin-bottom: 1.2rem; max-width: 60px;",
-                  if (is_complete) "#28a745" else "#dee2e6"
-                )
-              )
+        class = "rids-progress-panel",
+        div(
+          class = "rids-progress",
+          lapply(seq_along(steps), function(i) {
+            step     <- steps[[i]]
+            is_current  <- !is.null(current) && current == step$id
+            is_complete <- !is.null(current) && which(sapply(steps, `[[`, "id") == current) > i
+
+            state_class <- if (is_current) {
+              "is-current"
+            } else if (is_complete) {
+              "is-complete"
+            } else {
+              "is-upcoming"
             }
+            circle_content <- if (is_complete) icon("check") else as.character(i)
+
+            tagList(
+              div(
+                class = paste("rids-progress-step", state_class),
+                div(
+                  class = "rids-progress-circle",
+                  circle_content
+                ),
+                div(
+                  class = "rids-progress-label",
+                  step$label
+                )
+              ),
+              if (i < length(steps)) {
+                div(
+                  class = paste(
+                    "rids-progress-line",
+                    if (is_complete) "is-complete" else "is-upcoming"
+                  )
+                )
+              }
+            )
+          })
+        ),
+        if (length(metadata) > 0) {
+          div(
+            class = "rids-progress-metadata",
+            lapply(names(metadata), function(label) {
+              div(
+                class = "rids-progress-meta-item",
+                span(class = "rids-progress-meta-label", label),
+                span(class = "rids-progress-meta-value", metadata[[label]])
+              )
+            })
           )
-        })
+        }
       )
     })
   })

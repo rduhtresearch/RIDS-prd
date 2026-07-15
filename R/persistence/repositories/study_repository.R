@@ -46,6 +46,7 @@ study_repository <- function(con) {
         con,
         paste(
           "SELECT",
+          "m.id,",
           scrub("m.cpms_id", "cpms_id"), ",",
           scrub("m.study_site", "study_site"), ",",
           scrub("m.study_name", "study_name"), ",",
@@ -69,6 +70,7 @@ study_repository <- function(con) {
         con,
         paste(
           "SELECT",
+          "m.id,",
           scrub("m.cpms_id", "cpms_id"), ",",
           scrub("m.study_site", "study_site"), ",",
           scrub("m.study_name", "study_name"), ",",
@@ -80,7 +82,8 @@ study_repository <- function(con) {
           scrub("m.notes", "notes"), ",",
           scrub("m.saved_file_path", "saved_file_path"), ",",
           scrub("m.edge_zip_path", "edge_zip_path"), ",",
-          "m.speciality_id, s.name AS speciality_name",
+          "m.speciality_id, s.name AS speciality_name,",
+          "m.mff_split_enabled, m.mff_split_pct",
           "FROM meta_data m",
           "LEFT JOIN specialities s ON m.speciality_id = s.id",
           "WHERE m.cpms_id = ? AND m.study_site = ? AND m.scenario_id = ?"
@@ -115,6 +118,20 @@ study_repository <- function(con) {
     },
 
     find_run_files = function(cpms_id, study_site, scenario_id) {
+      if (DBI::dbExistsTable(con, "template_versions")) {
+        return(rids_dbGetQuery(
+          con,
+          paste(
+            "SELECT m.id,",
+            "COALESCE(tv.saved_file_path, m.saved_file_path) AS saved_file_path,",
+            "COALESCE(tv.edge_zip_path, m.edge_zip_path) AS edge_zip_path",
+            "FROM meta_data m",
+            "LEFT JOIN template_versions tv ON tv.study_id = m.id",
+            "WHERE m.cpms_id = ? AND m.study_site = ? AND m.scenario_id = ?"
+          ),
+          params = list(cpms_id, study_site, scenario_id)
+        ))
+      }
       rids_dbGetQuery(
         con,
         paste(
@@ -134,6 +151,7 @@ study_repository <- function(con) {
         addon_custom_activities = 0L,
         posting_lines = 0L,
         ict_costing_tbl = 0L,
+        template_versions = 0L,
         app_logs = 0L,
         meta_data = 0L
       )
@@ -167,6 +185,20 @@ study_repository <- function(con) {
             paste(
               "DELETE FROM ict_costing_tbl",
               "WHERE CPMS_ID = ? AND study_site = ? AND scenario_id = ?"
+            ),
+            params = run_params
+          ))
+        }
+
+        if (DBI::dbExistsTable(con, "template_versions")) {
+          counts$template_versions <- as.integer(rids_dbExecute(
+            con,
+            paste(
+              "DELETE FROM template_versions",
+              "WHERE study_id IN (",
+              "SELECT id FROM meta_data",
+              "WHERE cpms_id = ? AND study_site = ? AND scenario_id = ?",
+              ")"
             ),
             params = run_params
           ))

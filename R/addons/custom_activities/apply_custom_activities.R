@@ -60,6 +60,7 @@ apply_custom_activities <- function(pipeline_rows, shared_state, con = CON) {
     cpms_id = as.character(cpms_id),
     study_site = as.character(study_site),
     scenario_id = as.character(scenario_id),
+    version_id = shared_state$template_version_id,
     con = con
   )
   

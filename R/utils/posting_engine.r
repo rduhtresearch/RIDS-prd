@@ -239,6 +239,13 @@ join_ict_costs <- function(df, db_path) {
     df$contract_cost <- NA_real_
     return(df)
   }
+
+  if ("version_id" %in% names(df) && "version_id" %in% names(ict)) {
+    active_versions <- unique(stats::na.omit(df$version_id))
+    if (length(active_versions) == 1L) {
+      ict <- ict %>% filter(version_id == active_versions[[1]])
+    }
+  }
   
   # ── Row-level join: activity rows (Activity_Name NOT NULL) ─────────────────
   # staff_group is the disambiguator: same activity at the same visit with
@@ -309,7 +316,7 @@ apply_dist_rules <- function(df, dist_rules, scenario_id,
   carry_cols <- intersect(
     names(df),
     c("sheet_name", "Study_Arm", "Arm_Identity", "Visit", "Activity", "cpms_id", "study_name",
-      "row_id", "scenario_id", "row_category_auto", "calc_tag", "row_category",
+      "row_id", "scenario_id", "version_id", "row_category_auto", "calc_tag", "row_category",
       "is_medic", "Visit_Label", "activity_occurrence_id", "staff_group",
       "provider_org", "pi_org", "Activity.Cost", "contract_cost")
   )
@@ -486,7 +493,7 @@ select_output_cols <- function(posting_plan) {
   )
   
   # Optional columns from corrected schema (present if pipeline_fixed.r was used)
-  optional <- c("sheet_name", "Arm_Identity", "Visit_Label", "activity_occurrence_id", "staff_group", "contract_cost")
+  optional <- c("version_id", "sheet_name", "Arm_Identity", "Visit_Label", "activity_occurrence_id", "staff_group", "contract_cost")
   
   all_cols <- c(core, intersect(optional, names(posting_plan)))
   
