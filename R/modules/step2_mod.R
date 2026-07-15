@@ -223,7 +223,10 @@ step2_UI <- function(id) {
         icon("mouse-pointer"),
         "Select any row to adjust its contract cost."
       ),
-      reactableOutput(ns("table"))
+      div(
+        class = "step2-table-lock-frame",
+        reactableOutput(ns("table"))
+      )
     )
   )
 }
@@ -466,27 +469,51 @@ step2_Server <- function(id, auth_state, shared_state, current_step) {
     # ── Render table ──────────────────────────────────────────────────────────
     output$table <- renderReactable({
       req(working_data$df)
+
+      table_data <- visible_rows()
+      pinned_columns <- intersect(c("ICT_Cost", "Contract_Cost"), names(table_data))
+      table_data <- table_data[c(
+        setdiff(names(table_data), pinned_columns),
+        pinned_columns
+      )]
+
+      hidden_columns <- names(table_data)[
+        toupper(names(table_data)) %in% c(
+          ".STEP2_SOURCE_INDEX",
+          "VERSION_ID",
+          "STUDY",
+          "CPMS_ID",
+          "STUDY_SITE",
+          "SCENARIO_ID"
+        )
+      ]
+      column_definitions <- stats::setNames(
+        lapply(hidden_columns, function(column) colDef(show = FALSE)),
+        hidden_columns
+      )
+      column_definitions$ICT_Cost <- colDef(
+        name = "ICT Cost",
+        sticky = "right",
+        width = 150,
+        minWidth = 150,
+        class = "step2-cost-column step2-cost-column-ict",
+        headerClass = "step2-cost-column step2-cost-column-ict"
+      )
+      column_definitions$Contract_Cost <- colDef(
+        name = "Contract Cost",
+        sticky = "right",
+        width = 150,
+        minWidth = 150,
+        class = "step2-cost-column step2-cost-column-contract",
+        headerClass = "step2-cost-column step2-cost-column-contract"
+      )
+
       reactable(
-        visible_rows(),
+        table_data,
         selection = "single",
         onClick   = "select",
         rownames  = FALSE,
-        columns = list(
-          .step2_source_index = colDef(show = FALSE),
-          Contract_Cost = colDef(
-            name = "Contract Cost",
-            headerStyle = list(
-              background = "#eef5fa",
-              borderLeft = "1px solid #d6e4ef",
-              borderRight = "1px solid #d6e4ef"
-            ),
-            style = list(
-              background = "#f8fbfd",
-              borderLeft = "1px solid #e2edf5",
-              borderRight = "1px solid #e2edf5"
-            )
-          )
-        )
+        columns = column_definitions
       )
     })
     

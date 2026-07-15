@@ -1815,18 +1815,23 @@ body.app-shell .content-wrapper > .content {
   box-shadow: 0 3px 10px rgba(23, 39, 51, 0.08);
 }
 
+.rids-progress-panel {
+  width: min(calc(100% - 2rem), 46rem);
+  margin: 0 auto 1rem;
+  border: 1px solid var(--rids-border);
+  border-radius: var(--rids-radius-lg);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 6px 20px rgba(23, 39, 51, 0.045);
+  overflow: hidden;
+}
+
 .rids-progress {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  width: min(calc(100% - 2rem), 46rem);
-  margin: 0 auto 1rem;
+  width: 100%;
   padding: 0.8rem 1rem;
-  border: 1px solid var(--rids-border);
-  border-radius: var(--rids-radius-lg);
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 6px 20px rgba(23, 39, 51, 0.045);
 }
 
 .rids-progress-step {
@@ -1892,6 +1897,96 @@ body.app-shell .content-wrapper > .content {
 
 .rids-progress-line.is-complete {
   background: rgba(39, 134, 95, 0.55);
+}
+
+.rids-progress-metadata {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.1rem;
+  padding: 0.55rem 1rem 0.65rem;
+  border-top: 1px solid #e7eef2;
+  background: var(--rids-surface-subtle);
+}
+
+.rids-progress-meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.32rem;
+  min-width: 0;
+  font-size: 0.68rem;
+  line-height: 1.25;
+}
+
+.rids-progress-meta-label {
+  color: #7b8992;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.rids-progress-meta-value {
+  max-width: 15rem;
+  overflow: hidden;
+  color: var(--rids-ink-soft);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step2-table-lock-frame {
+  --step2-pinned-cost-width: 300px;
+  position: relative;
+}
+
+.step2-table-lock-frame::after {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  right: var(--step2-pinned-cost-width);
+  bottom: 48px;
+  width: 1px;
+  border-left: 1px solid rgba(31, 98, 136, 0.2);
+  box-shadow: -8px 0 14px -9px rgba(23, 39, 51, 0.7);
+  content: "";
+  pointer-events: none;
+}
+
+.rids-workflow-page .step2-cost-column {
+  border-color: #dce9ef !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rids-workflow-page .step2-cost-column-ict {
+  background: #f2f8fb !important;
+}
+
+.rids-workflow-page .step2-cost-column-contract {
+  background: #f2f8f5 !important;
+  border-left-color: #d7e7df !important;
+}
+
+.rids-workflow-page .rt-th.step2-cost-column-ict {
+  background: #eaf3f7 !important;
+  color: var(--rids-accent-dark);
+}
+
+.rids-workflow-page .rt-th.step2-cost-column-contract {
+  background: #e8f3ed !important;
+  color: #28684d;
+}
+
+.rids-workflow-page .rt-tr-selected .step2-cost-column-ict,
+.rids-workflow-page .rt-tr[aria-selected="true"] .step2-cost-column-ict {
+  background: #e4f1f6 !important;
+}
+
+.rids-workflow-page .rt-tr-selected .step2-cost-column-contract,
+.rids-workflow-page .rt-tr[aria-selected="true"] .step2-cost-column-contract {
+  background: #e3f1e9 !important;
 }
 
 .modal-content {
@@ -1981,6 +2076,29 @@ body.app-shell .content-wrapper > .content {
 
   .rids-progress-label {
     font-size: 0.62rem;
+  }
+
+  .rids-progress-panel {
+    width: calc(100% - 1rem);
+  }
+
+  .rids-progress {
+    padding: 0.7rem 0.6rem;
+  }
+
+  .rids-progress-metadata {
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.4rem 0.75rem;
+    padding: 0.55rem 0.7rem 0.65rem;
+  }
+
+  .rids-progress-meta-item {
+    flex: 1 1 calc(50% - 0.75rem);
+  }
+
+  .rids-progress-meta-value {
+    max-width: 100%;
   }
 
   .rids-workflow-page .card-footer,
