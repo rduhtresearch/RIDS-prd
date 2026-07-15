@@ -44,6 +44,9 @@ integrationsUI <- function(id) {
 integrationsServer <- function(id, auth_state) {
   moduleServer(id, function(input, output, session) {
     edge_refresh <- reactiveVal(0L)
+    if (is.null(session$userData$edge_credential_refresh)) {
+      session$userData$edge_credential_refresh <- reactiveVal(0L)
+    }
 
     edge_status <- reactive({
       req(auth_state$logged_in)
@@ -106,6 +109,7 @@ integrationsServer <- function(id, auth_state) {
 
       updateTextInput(session, "edge_api_key", value = "")
       edge_refresh(edge_refresh() + 1L)
+      session$userData$edge_credential_refresh(session$userData$edge_credential_refresh() + 1L)
       showNotification("EDGE API key saved.", type = "message", duration = 5)
     })
 
@@ -136,6 +140,7 @@ integrationsServer <- function(id, auth_state) {
 
       updateTextInput(session, "edge_api_key", value = "")
       edge_refresh(edge_refresh() + 1L)
+      session$userData$edge_credential_refresh(session$userData$edge_credential_refresh() + 1L)
       showNotification("EDGE API key deleted.", type = "message", duration = 5)
     })
   })
