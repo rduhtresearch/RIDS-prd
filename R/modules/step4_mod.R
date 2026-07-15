@@ -55,570 +55,104 @@ step4_available_preview_arms <- function(templates = NULL) {
   template_names
 }
 
-# step4_UI <- function(id) {
-#   ns <- NS(id)
-#   tagList(
-#     bs4Card(
-#       title       = "Generate EDGE Templates",
-#       width       = 12,
-#       status      = "primary",
-#       solidHeader = FALSE,
-#       footer = tagList(
-#         downloadButton(ns("download_zip"), "Download ZIP", class = "btn-success"),
-#         actionButton(ns("complete"), "Complete and return to library", class = "btn-primary")
-#       ),
-#       div(
-#         style = "display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;",
-#         selectInput(ns("arm_select"), label = "Study Arm", choices = NULL, width = "200px"),
-#         uiOutput(ns("save_status"))
-#       ),
-#       reactableOutput(ns("preview_table")),
-#       
-#       hr(),
-#       h4("Template builder (preview)"),
-#       edgeBuilderUI(ns("edge_builder"))
-#     )
-#   )
-# }
-# 
-# # step4_Server <- function(id, auth_state, shared_state, current_step) {
-# #   moduleServer(id, function(input, output, session) {
-# #     
-# #     templates <- reactiveVal(NULL)
-# #     zip_path  <- reactiveVal(NULL)
-# #     
-# #     edited_templates <- edgeBuilderServer(
-# #       id             = "edge_builder",
-# #       edge_templates = reactive(shared_state$edge_templates)
-# #     )
-# #     
-# #     w <- Waiter$new(
-# #       html = tagList(
-# #         div(
-# #           style = "display: flex; flex-direction: column; align-items: center; gap: 1.5rem;",
-# #           div(class = "green-ring"),
-# #           div(
-# #             style = "color: #ffffff; font-size: 1rem; font-weight: 600;",
-# #             "Generating EDGE templates"
-# #           ),
-# #           div(
-# #             style = "color: rgba(255,255,255,0.5); font-size: 0.8rem;",
-# #             "This may take a moment..."
-# #           )
-# #         )
-# #       ),
-# #       color = "rgba(31, 95, 139, 0.55)"
-# #     )
-# #     
-# #     # ── Generate templates on load ────────────────────────────────────────────
-# #     observe({
-# #       req(shared_state$current_step == "step4")
-# #       req(shared_state$evaluated_plan)
-# #       
-# #       w$show()
-# #       
-# #       # Step 1 — adjust posting lines
-# #       adjusted <- tryCatch({
-# #         adjust_posting_lines(shared_state$evaluated_plan)
-# #       }, error = function(e) {
-# #         message("adjust_posting_lines error: ", e$message)
-# #         showNotification("Failed to adjust posting lines", type = "error")
-# #         w$hide()
-# #         return(NULL)
-# #       })
-# #       
-# #       req(adjusted)
-# #       
-# #       # Note: Fix this - needs to be renamed earlier in the pipeline. This is not clean.
-# #       adjusted <- adjusted %>% 
-# #         rename(Staff_Role = Staff.Role)
-# #       
-# #       # Step 2 — save posting lines to DB
-# #       tryCatch({
-# #         dbExecute(CON,
-# #                   "DELETE FROM posting_lines WHERE cpms_id = ?",
-# #                   params = list(as.character(shared_state$cpms_id))
-# #         )
-# #         dbAppendTable(CON, "posting_lines", adjusted)
-# #         message("Posting lines saved to DB: ", nrow(adjusted), " rows")
-# #       }, error = function(e) {
-# #         message("Posting lines DB error: ", e$message)
-# #         showNotification("Failed to save posting lines", type = "error")
-# #       })
-# #       
-# #       # Step 3 — build templates
-# #       tmpl <- tryCatch({
-# #         build_all_edge_templates(adjusted)
-# #       }, error = function(e) {
-# #         message("build_all_edge_templates error: ", e$message)
-# #         showNotification("Failed to build templates", type = "error")
-# #         w$hide()
-# #         return(NULL)
-# #       })
-# #       
-# #       req(tmpl)
-# #       templates(tmpl)
-# #       shared_state$edge_templates <- tmpl
-# #       
-# #       # Step 4 — write CSVs and zip
-# #       tryCatch({
-# #         tmp_dir <- tempdir()
-# #         
-# #         for (arm in names(tmpl)) {
-# #           csv_path <- file.path(tmp_dir, paste0(arm, ".csv"))
-# #           write.csv(tmpl[[arm]], csv_path, row.names = FALSE)
-# #         }
-# #         
-# #         timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-# #         zip_name  <- paste0(shared_state$cpms_id, "_", timestamp, ".zip")
-# #         zp        <- file.path(EDGE_OUTPUT_DIR, zip_name)
-# #         
-# #         if (!dir.exists(EDGE_OUTPUT_DIR)) dir.create(EDGE_OUTPUT_DIR, recursive = TRUE)
-# #         
-# #         zip(zp, files = file.path(tmp_dir, paste0(names(tmpl), ".csv")), flags = "-j")
-# #         zip_path(zp)
-# #         
-# #       }, error = function(e) {
-# #         message("Zip error: ", e$message)
-# #         showNotification("Failed to save ZIP", type = "error")
-# #       })
-# #       
-# #       updateSelectInput(session, "arm_select", choices = names(tmpl))
-# #       
-# #       w$hide()
-# #       showNotification("Templates generated successfully", type = "message", duration = 5)
-# #     })
-# #     
-# #     # ── Preview selected arm ──────────────────────────────────────────────────
-# #     output$preview_table <- renderReactable({
-# #       req(templates())
-# #       req(input$arm_select)
-# #       req(input$arm_select %in% names(templates()))
-# #       
-# #       df <- templates()[[input$arm_select]]
-# #       
-# #       reactable(
-# #         df,
-# #         columns = list(
-# #           Department = colDef(show = FALSE)
-# #         ),
-# #         striped       = TRUE,
-# #         highlight     = TRUE,
-# #         compact       = TRUE,
-# #         rownames      = FALSE,
-# #         pagination    = FALSE,
-# #         height        = 500,
-# #         resizable     = TRUE,
-# #         wrap          = FALSE,
-# #         defaultColDef = colDef(minWidth = 120)
-# #       )
-# #     })
-# #     
-# #     # ── Save status ───────────────────────────────────────────────────────────
-# #     output$save_status <- renderUI({
-# #       req(zip_path())
-# #       div(
-# #         style = "display: flex; align-items: center; gap: 0.5rem;",
-# #         span(style = "color: #28a745; font-size: 1.2rem;", "✓"),
-# #         span(
-# #           style = "font-size: 0.85rem; color: #697786;",
-# #           paste0("Saved to: ", zip_path())
-# #         )
-# #       )
-# #     })
-# #     
-# #     # ── Download ZIP ──────────────────────────────────────────────────────────
-# #     output$download_zip <- downloadHandler(
-# #       filename = function() {
-# #         paste0(shared_state$cpms_id, "_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".zip")
-# #       },
-# #       content = function(file) {
-# #         req(zip_path())
-# #         file.copy(zip_path(), file)
-# #       }
-# #     )
-# #     
-# #   })
-# # }
-# 
-# step4_Server <- function(id, auth_state, shared_state, current_step) {
-#   moduleServer(id, function(input, output, session) {
-#     
-#     templates <- reactiveVal(NULL)
-#     zip_path  <- reactiveVal(NULL)
-#     
-#     # ── Reset helper for shared_state ──────────────────────────────────────────
-#     reset_shared_state <- function() {
-#       shared_state$scenario_id      <- NULL
-#       shared_state$edge_id          <- NULL
-#       shared_state$cpms_id          <- NULL
-#       shared_state$filename         <- NULL
-#       shared_state$upload_meta      <- NULL
-#       shared_state$raw_ict          <- NULL
-#       shared_state$posting_plan     <- NULL
-#       shared_state$processed_ict    <- NULL
-#       shared_state$evaluated_plan   <- NULL
-#       shared_state$edge_templates   <- NULL
-#       shared_state$speciality_id    <- NULL
-#       shared_state$speciality_name  <- NULL
-#       shared_state$current_step     <- NULL
-#       shared_state$timestamp        <- NULL
-#     }
-#     
-#     templates <- reactiveVal(NULL)
-#     zip_path  <- reactiveVal(NULL)
-#     
-#     # ── Edge template builder module ─────────────────────────────────────────
-#     edited_templates <- edgeBuilderServer(
-#       id             = "edge_builder",
-#       edge_templates = reactive(shared_state$edge_templates)
-#     )
-#     
-#     w <- Waiter$new(
-#       html = tagList(
-#         div(
-#           style = "display: flex; flex-direction: column; align-items: center; gap: 1.5rem;",
-#           div(class = "green-ring"),
-#           div(
-#             style = "color: #ffffff; font-size: 1rem; font-weight: 600;",
-#             "Generating EDGE templates"
-#           ),
-#           div(
-#             style = "color: rgba(255,255,255,0.5); font-size: 0.8rem;",
-#             "This may take a moment..."
-#           )
-#         )
-#       ),
-#       color = "rgba(31, 95, 139, 0.55)"
-#     )
-#     
-#     # ── Helpers ──────────────────────────────────────────────────────────────
-#     
-#     prepare_for_export <- function(tpls) {
-#       Filter(function(d) !is.null(d) && nrow(d) > 0, tpls)
-#     }
-#     
-#     # Department is internal-only — drives builder read-only logic.
-#     # EDGE expects it blank on import, and the top preview represents the export.
-#     blank_department <- function(tpls) {
-#       lapply(tpls, function(d) {
-#         if ("Department" %in% names(d)) d$Department <- NA
-#         d
-#       })
-#     }
-#     
-#     # prepare_for_export <- function(tpls) {
-#     #   Filter(function(d) !is.null(d) && nrow(d) > 0, tpls)
-#     # }
-#     
-#     write_zip <- function(tpls, zp) {
-#       
-#       tpls <- prepare_for_export(tpls)
-#       if (length(tpls) == 0) {
-#         stop("No templates with rows to export.")
-#       }
-#       tpls <- blank_department(tpls)
-#       
-#       
-#       if (length(tpls) == 0) {
-#         stop("No templates with rows to export.")
-#       }
-#       # Write CSVs locally first
-#       tmp_dir <- tempfile("edge_export_")
-#       dir.create(tmp_dir, recursive = TRUE)
-#       on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
-#       csv_files <- character(length(tpls))
-#       for (i in seq_along(tpls)) {
-#         nm <- names(tpls)[i]
-#         # Make filename safe
-#         safe_nm <- gsub("[^A-Za-z0-9_-]", "_", nm)
-#         csv <- file.path(tmp_dir, paste0(safe_nm, ".csv"))
-#         write.csv(
-#           tpls[[i]],
-#           file = csv,
-#           row.names = FALSE,
-#           na = ""
-#         )
-#         csv_files[i] <- csv
-#       }
-#       if (!all(file.exists(csv_files))) {
-#         stop("One or more CSV files were not created before zipping.")
-#       }
-#       # Create ZIP locally first
-#       local_zip <- tempfile("edge_zip_", fileext = ".zip")
-#       zip::zipr(
-#         zipfile = local_zip,
-#         files   = csv_files,
-#         root    = tmp_dir
-#       )
-#       if (!file.exists(local_zip) || file.info(local_zip)$size == 0) {
-#         stop("ZIP archive was not created locally.")
-#       }
-#       # Copy final ZIP to network/shared output path
-#       out_dir <- dirname(zp)
-#       if (!dir.exists(out_dir)) {
-#         dir.create(out_dir, recursive = TRUE)
-#       }
-#       ok <- file.copy(local_zip, zp, overwrite = TRUE)
-#       if (!ok || !file.exists(zp) || file.info(zp)$size == 0) {
-#         stop("ZIP was created locally but could not be copied to: ", zp)
-#       }
-#       invisible(zp)
-#     }
-#     
-#     # ── Generate templates on load ────────────────────────────────────────────
-#     observe({
-#       req(shared_state$current_step == "step4")
-#       req(shared_state$evaluated_plan)
-#       
-#       w$show()
-#       
-#       adjusted <- tryCatch({
-#         adjust_posting_lines(shared_state$evaluated_plan)
-#       }, error = function(e) {
-#         message("adjust_posting_lines error: ", e$message)
-#         showNotification("Failed to adjust posting lines", type = "error")
-#         w$hide()
-#         return(NULL)
-#       })
-#       
-#       req(adjusted)
-#       
-#       adjusted <- adjusted %>% rename(Staff_Role = Staff.Role)
-#       
-#       # ── Attach cost centres ──────────────────────────────────────────────────
-#       adjusted <- tryCatch({
-#         add_cost_centres(adjusted, isolate(shared_state$speciality_name))
-#       }, error = function(e) {
-#         message("add_cost_centres error: ", conditionMessage(e))
-#         showNotification(
-#           paste("Failed to assign cost centres:", conditionMessage(e)),
-#           type = "error",
-#           duration = 10
-#         )
-#         return(adjusted)
-#       })
-#       
-#       adjusted <- tryCatch({
-#         assign_edge_keys(adjusted)
-#       }, error = function(e) {
-#         message("assign_edge_keys error: ", conditionMessage(e))
-#         showNotification(
-#           paste("Failed to assign EDGE keys:", conditionMessage(e)),
-#           type = "error",
-#           duration = 10
-#         )
-#         return(adjusted)
-#       })
-#       
-#       tryCatch({
-#         dbExecute(CON,
-#                   "DELETE FROM posting_lines WHERE cpms_id = ?",
-#                   params = list(as.character(shared_state$cpms_id))
-#         )
-#         dbAppendTable(CON, "posting_lines", adjusted)
-#         message("Posting lines saved to DB: ", nrow(adjusted), " rows")
-#       }, error = function(e) {
-#         message("Posting lines DB error: ", e$message)
-#         showNotification("Failed to save posting lines", type = "error")
-#       })
-#       
-#       tmpl <- tryCatch({
-#       
-#         visit_lookup <- dbGetQuery(CON, "
-#                         SELECT DISTINCT Study, Study_Arm, Visit_Label, Visit_Number
-#                         FROM ict_costing_tbl
-#                         WHERE Visit_Label IS NOT NULL
-#                       ")
-#         
-#         templates <- build_all_edge_templates(adjusted, visit_lookup, shared_state$upload_meta$edge_id)
-#         
-#       }, error = function(e) {
-#         message("build_all_edge_templates error: ", e$message)
-#         showNotification("Failed to build templates", type = "error")
-#         w$hide()
-#         return(NULL)
-#       })
-#       
-#       req(tmpl)
-#       templates(tmpl)
-#       shared_state$edge_templates <- tmpl
-#       
-#       # Initial ZIP write — uses original templates (user hasn't touched yet).
-#       # The download handler regenerates from edited_templates() on click.
-#       tryCatch({
-#         timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-#         zip_name  <- paste0(shared_state$cpms_id, "_", timestamp, ".zip")
-#         zp        <- file.path(EDGE_OUTPUT_DIR, zip_name)
-#         
-#         if (!dir.exists(EDGE_OUTPUT_DIR)) dir.create(EDGE_OUTPUT_DIR, recursive = TRUE)
-#         
-#         write_zip(tmpl, zp)
-#         zip_path(zp)
-#         
-#         # Persist the ZIP path to meta_data for this study
-#         dbExecute(CON,
-#                   "UPDATE meta_data SET edge_zip_path = ? WHERE cpms_id = ?",
-#                   params = list(zp, as.character(shared_state$cpms_id))
-#         )
-#         
-#       }, error = function(e) {
-#         message("Zip error: ", e$message)
-#         showNotification("Failed to save ZIP", type = "error")
-#       })
-#       
-#       updateSelectInput(session, "arm_select", choices = names(tmpl))
-#       
-#       w$hide()
-#       showNotification("Templates generated successfully", type = "message", duration = 5)
-#     })
-#     
-#     # ── Preview selected arm ──────────────────────────────────────────────────
-#     # output$preview_table <- renderReactable({
-#     #   req(templates())
-#     #   req(input$arm_select)
-#     #   req(input$arm_select %in% names(templates()))
-#     #   
-#     #   df <- templates()[[input$arm_select]]
-#     #   
-#     #   reactable(
-#     #     df,
-#     #     columns = list(
-#     #       Department = colDef(show = FALSE)
-#     #     ),
-#     #     striped       = TRUE,
-#     #     highlight     = TRUE,
-#     #     compact       = TRUE,
-#     #     rownames      = FALSE,
-#     #     pagination    = FALSE,
-#     #     height        = 500,
-#     #     resizable     = TRUE,
-#     #     wrap          = FALSE,
-#     #     defaultColDef = colDef(minWidth = 120)
-#     #   )
-#     # })
-#     output$preview_table <- renderReactable({
-#       req(input$arm_select)
-#       
-#       tpls <- edited_templates()
-#       if (is.null(tpls) || length(tpls) == 0) tpls <- templates()
-#       
-#       req(tpls, input$arm_select %in% names(tpls))
-#       
-#       df <- blank_department(tpls)[[input$arm_select]]
-#       
-#       reactable(
-#         df,
-#         striped       = TRUE,
-#         highlight     = TRUE,
-#         compact       = TRUE,
-#         rownames      = FALSE,
-#         pagination    = FALSE,
-#         height        = 500,
-#         resizable     = TRUE,
-#         wrap          = FALSE,
-#         defaultColDef = colDef(minWidth = 120)
-#       )
-#     })
-#     
-#     # ── Save status ───────────────────────────────────────────────────────────
-#     output$save_status <- renderUI({
-#       req(zip_path())
-#       div(
-#         style = "display: flex; align-items: center; gap: 0.5rem;",
-#         span(style = "color: #28a745; font-size: 1.2rem;", "✓"),
-#         span(
-#           style = "font-size: 0.85rem; color: #697786;",
-#           paste0("Saved to: ", zip_path())
-#         )
-#       )
-#     })
-#     
-#     # ── Download ZIP (rebuilds from edited templates on click) ───────────────
-#     output$download_zip <- downloadHandler(
-#       filename = function() {
-#         paste0(shared_state$cpms_id, "_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".zip")
-#       },
-#       contentType = "application/zip",
-#       content = function(file) {
-#         tpls <- edited_templates()
-#         if (is.null(tpls) || length(tpls) == 0) {
-#           tpls <- templates()
-#         }
-#         
-#         req(tpls)
-#         
-#         tmp_zip <- tempfile("edge_download_", fileext = ".zip")
-#         on.exit(unlink(tmp_zip), add = TRUE)
-#         
-#         write_zip(tpls, tmp_zip)
-#         
-#         ok <- file.copy(tmp_zip, file, overwrite = TRUE)
-#         if (!ok || !file.exists(file)) {
-#           stop("Failed to copy ZIP to the download target.")
-#         }
-#       }
-#     )
-#     
-#     # ── Complete: success modal + navigate + reset ──────────────────────────
-#     observeEvent(input$complete, {
-#       
-#       current_session <- session
-#       
-#       showModal(modalDialog(
-#         title     = NULL,
-#         footer    = NULL,
-#         easyClose = FALSE,
-#         size      = "s",
-#         div(
-#           style = "text-align: center; padding: 1.5rem 1rem;",
-#           div(
-#             style = paste(
-#               "width: 64px;",
-#               "height: 64px;",
-#               "border-radius: 50%;",
-#               "background: #e6f4ea;",
-#               "display: flex;",
-#               "align-items: center;",
-#               "justify-content: center;",
-#               "margin: 0 auto 1rem auto;"
-#             ),
-#             tags$span(
-#               style = "color: #28a745; font-size: 2rem; font-weight: 700;",
-#               HTML("&check;")
-#             )
-#           ),
-#           h4(
-#             style = "margin-bottom: 0.5rem; color: #1d2a36;",
-#             "Study processed successfully"
-#           ),
-#           p(
-#             style = "color: #697786; margin-bottom: 0;",
-#             "Opening the study library..."
-#           )
-#         )
-#       ))
-#       
-#       later::later(function() {
-#         shiny::withReactiveDomain(current_session, {
-#           removeModal()
-#           templates(NULL)
-#           zip_path(NULL)
-#           reset_shared_state()
-#           current_step(NULL)
-#           shinyjs::runjs('$("a[data-value=\'tab_library\']").trigger("click")')
-#           shinyjs::runjs("$('body').addClass('sidebar-collapse')")
-#         })
-#       }, delay = 2)
-#     })
-#     
-#     # ── Disable Complete until templates exist ──────────────────────────────
-#     observe({
-#       shinyjs::toggleState("complete", condition = !is.null(templates()))
-#     })
-#     
-#   })
-# }
+step4_filter_export_templates <- function(templates) {
+  Filter(function(template) !is.null(template) && nrow(template) > 0, templates)
+}
+
+# Department is internal-only — drives builder read-only logic.
+# EDGE expects it blank on import, and the top preview represents the export.
+step4_blank_export_departments <- function(templates) {
+  lapply(templates, function(template) {
+    if ("Department" %in% names(template)) template$Department <- NA
+    template
+  })
+}
+
+step4_apply_amendment_export_rules <- function(templates,
+                                                version_type,
+                                                effective_from_date,
+                                                version_number) {
+  templates <- suffix_amendment_template_names(
+    templates,
+    version_type = version_type,
+    effective_from_date = effective_from_date
+  )
+
+  qualify_amendment_analysis_codes(
+    templates,
+    version_type = version_type,
+    version_number = version_number
+  )
+}
+
+step4_write_export_zip <- function(templates,
+                                   zip_path,
+                                   version_type,
+                                   effective_from_date,
+                                   version_number) {
+  templates <- step4_filter_export_templates(templates)
+  if (length(templates) == 0) {
+    stop("No templates with rows to export.")
+  }
+
+  templates <- step4_apply_amendment_export_rules(
+    templates,
+    version_type = version_type,
+    effective_from_date = effective_from_date,
+    version_number = version_number
+  )
+  templates <- step4_blank_export_departments(templates)
+
+  if (length(templates) == 0) {
+    stop("No templates with rows to export.")
+  }
+
+  tmp_dir <- tempfile("edge_export_")
+  dir.create(tmp_dir, recursive = TRUE)
+  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+
+  csv_files <- character(length(templates))
+  for (i in seq_along(templates)) {
+    template_name <- names(templates)[i]
+    safe_name <- edge_template_export_stem(
+      template_name,
+      version_type = version_type
+    )
+    csv_path <- file.path(tmp_dir, paste0(safe_name, ".csv"))
+    write.csv(
+      templates[[i]],
+      file = csv_path,
+      row.names = FALSE,
+      na = ""
+    )
+    csv_files[i] <- csv_path
+  }
+
+  if (!all(file.exists(csv_files))) {
+    stop("One or more CSV files were not created before zipping.")
+  }
+
+  local_zip <- tempfile("edge_zip_", fileext = ".zip")
+  zip::zipr(
+    zipfile = local_zip,
+    files = csv_files,
+    root = tmp_dir
+  )
+  if (!file.exists(local_zip) || file.info(local_zip)$size == 0) {
+    stop("ZIP archive was not created locally.")
+  }
+
+  output_dir <- dirname(zip_path)
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  copied <- file.copy(local_zip, zip_path, overwrite = TRUE)
+  if (!copied || !file.exists(zip_path) || file.info(zip_path)$size == 0) {
+    stop("ZIP was created locally but could not be copied to: ", zip_path)
+  }
+
+  invisible(zip_path)
+}
 
 step4_UI <- function(id) {
   ns <- NS(id)
@@ -709,10 +243,6 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
     
     # ── Helpers ──────────────────────────────────────────────────────────────
     
-    prepare_for_export <- function(tpls) {
-      Filter(function(d) !is.null(d) && nrow(d) > 0, tpls)
-    }
-
     clear_cost_centre_failure <- function() {
       unmatched_cost_centres(NULL)
       unmatched_cost_centres_summary(tibble::tibble())
@@ -759,80 +289,14 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
         )
     }
     
-    # Department is internal-only — drives builder read-only logic.
-    # EDGE expects it blank on import, and the top preview represents the export.
-    blank_department <- function(tpls) {
-      lapply(tpls, function(d) {
-        if ("Department" %in% names(d)) d$Department <- NA
-        d
-      })
-    }
-    
     write_zip <- function(tpls, zp) {
-      
-      tpls <- prepare_for_export(tpls)
-      if (length(tpls) == 0) {
-        stop("No templates with rows to export.")
-      }
-      tpls <- suffix_amendment_template_names(
+      step4_write_export_zip(
         tpls,
+        zip_path = zp,
         version_type = shared_state$template_version_type,
-        effective_from_date = shared_state$template_version_effective_date
-      )
-      tpls <- qualify_amendment_analysis_codes(
-        tpls,
-        version_type = shared_state$template_version_type,
+        effective_from_date = shared_state$template_version_effective_date,
         version_number = shared_state$template_version_number
       )
-      tpls <- blank_department(tpls)
-      
-      
-      if (length(tpls) == 0) {
-        stop("No templates with rows to export.")
-      }
-      # Write CSVs locally first
-      tmp_dir <- tempfile("edge_export_")
-      dir.create(tmp_dir, recursive = TRUE)
-      on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
-      csv_files <- character(length(tpls))
-      for (i in seq_along(tpls)) {
-        nm <- names(tpls)[i]
-        safe_nm <- edge_template_export_stem(
-          nm,
-          version_type = shared_state$template_version_type
-        )
-        csv <- file.path(tmp_dir, paste0(safe_nm, ".csv"))
-        write.csv(
-          tpls[[i]],
-          file = csv,
-          row.names = FALSE,
-          na = ""
-        )
-        csv_files[i] <- csv
-      }
-      if (!all(file.exists(csv_files))) {
-        stop("One or more CSV files were not created before zipping.")
-      }
-      # Create ZIP locally first
-      local_zip <- tempfile("edge_zip_", fileext = ".zip")
-      zip::zipr(
-        zipfile = local_zip,
-        files   = csv_files,
-        root    = tmp_dir
-      )
-      if (!file.exists(local_zip) || file.info(local_zip)$size == 0) {
-        stop("ZIP archive was not created locally.")
-      }
-      # Copy final ZIP to network/shared output path
-      out_dir <- dirname(zp)
-      if (!dir.exists(out_dir)) {
-        dir.create(out_dir, recursive = TRUE)
-      }
-      ok <- file.copy(local_zip, zp, overwrite = TRUE)
-      if (!ok || !file.exists(zp) || file.info(zp)$size == 0) {
-        stop("ZIP was created locally but could not be copied to: ", zp)
-      }
-      invisible(zp)
     }
 
     log_step4_event <- function(level, message, details = list()) {
@@ -1372,17 +836,13 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       req(preview_arm)
 
       preview_template <- stats::setNames(list(tpls[[preview_arm]]), preview_arm)
-      preview_template <- suffix_amendment_template_names(
+      preview_template <- step4_apply_amendment_export_rules(
         preview_template,
         version_type = shared_state$template_version_type,
-        effective_from_date = shared_state$template_version_effective_date
-      )
-      preview_template <- qualify_amendment_analysis_codes(
-        preview_template,
-        version_type = shared_state$template_version_type,
+        effective_from_date = shared_state$template_version_effective_date,
         version_number = shared_state$template_version_number
       )
-      df <- blank_department(preview_template)[[1]]
+      df <- step4_blank_export_departments(preview_template)[[1]]
       
       reactable(
         df,

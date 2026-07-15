@@ -67,7 +67,7 @@ ca_init_ref_activities <- function(con = CON) {
 #' @return     Character vector of names, ordered alphabetically.
 ca_load_ref_activities <- function(con = CON) {
   
-  df <- dbGetQuery(con, "
+  df <- rids_dbGetQuery(con, "
     SELECT name
     FROM ref_custom_activities
     WHERE archived_at IS NULL
