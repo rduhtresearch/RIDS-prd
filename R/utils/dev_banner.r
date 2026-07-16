@@ -39,14 +39,7 @@ dev_banner <- function() {
     style = paste(
       sprintf("background: %s;", cfg$background),
       sprintf("color: %s;", cfg$color),
-      sprintf("border-left: 4px solid %s;", cfg$border),
-      "border-radius: 0 4px 4px 0;",
-      "padding: 0.5rem 1rem;",
-      "font-size: 0.82rem;",
-      "letter-spacing: 0.01em;",
-      "max-width: 720px;",
-      "margin: 0.75rem auto;",
-      "z-index: 1050;"
+      sprintf("border-left-color: %s;", cfg$border)
     ),
     cfg$text
   )

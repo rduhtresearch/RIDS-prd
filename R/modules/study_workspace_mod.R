@@ -1,3 +1,11 @@
+study_workspace_kv <- function(label, value) {
+  div(
+    class = "rids-study-kv",
+    div(class = "rids-study-kv-label", label),
+    div(class = "rids-study-kv-value", value)
+  )
+}
+
 studyWorkspaceUI <- function(id) {
   ns <- NS(id)
   
@@ -35,7 +43,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
     # ── Helper: render a value, falling back to em-dash if NA/empty ──────────
     fmt_value <- function(x) {
       if (is.null(x) || length(x) == 0 || is.na(x) || !nzchar(as.character(x))) {
-        return(tags$span(style = "color: #aaa;", "—"))
+        return(tags$span(class = "rids-muted-placeholder", "—"))
       }
       as.character(x)
     }
@@ -143,7 +151,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
     output$body <- renderUI({
       if (is.null(shared_state$current_study)) {
         return(p(
-          style = "color: #697786; padding: 1rem;",
+          class = "rids-study-state",
           "No study selected. Open one from the library."
         ))
       }
@@ -152,7 +160,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
       if (is.null(meta)) {
         ref <- active_study()
         return(p(
-          style = "color: #c0392b; padding: 1rem;",
+          class = "rids-study-state is-error",
           paste0(
             "Study not found: CPMS ",
             ref$cpms_id,
@@ -175,40 +183,26 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
         paste0(meta$uploaded_by, " · ", uploaded_at)
       }
       
-      kv <- function(label, value) {
-        div(
-          style = "display: grid; grid-template-columns: 180px 1fr; gap: 1rem; padding: 0.45rem 0;",
-          div(
-            style = "font-size: 0.82rem; color: #697786; font-weight: 500;",
-            label
-          ),
-          div(
-            style = "font-size: 0.92rem; color: #1d2a36;",
-            value
-          )
-        )
-      }
-      
       overview_panel <- div(
-        style = "padding: 1rem;",
-        kv("CPMS ID",        fmt_value(meta$cpms_id)),
-        kv("Study Site",     fmt_value(meta$study_site)),
-        kv("EDGE ID",        fmt_value(meta$edge_id)),
-        kv("Scenario",       fmt_value(meta$scenario_id)),
-        kv("Speciality",     fmt_value(meta$speciality_name)),
-        kv("Original file",  fmt_value(meta$original_filename)),
-        kv("Uploaded by",    uploader_blob),
+        class = "rids-study-panel",
+        study_workspace_kv("CPMS ID",        fmt_value(meta$cpms_id)),
+        study_workspace_kv("Study Site",     fmt_value(meta$study_site)),
+        study_workspace_kv("EDGE ID",        fmt_value(meta$edge_id)),
+        study_workspace_kv("Scenario",       fmt_value(meta$scenario_id)),
+        study_workspace_kv("Speciality",     fmt_value(meta$speciality_name)),
+        study_workspace_kv("Original file",  fmt_value(meta$original_filename)),
+        study_workspace_kv("Uploaded by",    uploader_blob),
         
-        hr(style = "margin: 1rem 0;"),
+        hr(class = "rids-section-rule"),
         
         div(
-          style = "font-size: 0.82rem; color: #697786; font-weight: 500; margin-bottom: 0.4rem;",
+          class = "rids-study-kv-label rids-study-notes-label",
           "Notes"
         ),
         div(
-          style = "font-size: 0.9rem; color: #1d2a36; line-height: 1.5;",
+          class = "rids-study-notes",
           if (is.na(meta$notes) || !nzchar(meta$notes)) {
-            tags$span(style = "color: #aaa; font-style: italic;", "No notes")
+            tags$span(class = "rids-muted-placeholder", "No notes")
           } else {
             meta$notes
           }
@@ -221,16 +215,16 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
       n_posting <- posting_count()
       
       posting_panel <- div(
-        style = "padding: 1rem;",
+        class = "rids-study-panel",
         if (nrow(posting_version_rows) == 0L) {
           p(
-            style = "color: #aaa; font-style: italic;",
+            class = "rids-muted-placeholder",
             "No completed template versions are available for this study."
           )
         } else {
           tagList(
             p(
-              style = "color: #697786; margin-bottom: 1rem;",
+              class = "rids-form-copy rids-study-panel-copy",
               "Select a template version to download its posting lines as a CSV file."
             ),
             selectInput(
@@ -241,7 +235,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
               width = "100%"
             ),
             div(
-              style = "font-size: 0.82rem; color: #697786; margin-bottom: 1rem;",
+              class = "rids-study-version-summary",
               if (!is.null(selected_version)) {
                 effective <- as.Date(selected_version$effective_from_date[[1]])
                 effective_label <- if (is.na(effective)) {
@@ -261,7 +255,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
             ),
             if (n_posting == 0L) {
               p(
-                style = "color: #8a5b00; font-size: 0.86rem; margin-bottom: 0;",
+                class = "rids-study-warning",
                 "No posting lines are available for this template version."
               )
             } else {
@@ -284,15 +278,15 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
         file.exists(available_zip_path)
       
       edge_panel <- div(
-        style = "padding: 1rem;",
+        class = "rids-study-panel",
         if (edge_zip_exists) {
           tagList(
             p(
-              style = "color: #697786; margin-bottom: 1rem;",
+              class = "rids-form-copy rids-study-panel-copy",
               "Download the EDGE templates that were generated for this study."
             ),
             div(
-              style = "font-size: 0.82rem; color: #697786; margin-bottom: 1rem;",
+              class = "rids-study-version-summary",
               version_label(
                 available_version$version_type[[1]],
                 available_version$effective_from_date[[1]]
@@ -306,7 +300,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
           )
         } else {
           p(
-            style = "color: #aaa; font-style: italic;",
+            class = "rids-muted-placeholder",
             "No EDGE templates ZIP found for this study. The file may have been deleted or never generated."
           )
         }
@@ -317,16 +311,16 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
         exists <- !is.null(path) && !is.na(path) && nzchar(path) && file.exists(path)
         
         div(
-          style = "padding: 0.75rem 0; border-bottom: 1px solid #f0f4f8;",
+          class = "rids-file-row",
           div(
-            style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;",
+            class = "rids-file-row-header",
             div(
-              style = "font-size: 0.92rem; font-weight: 600; color: #1d2a36;",
+              class = "rids-file-row-title",
               label
             ),
             if (exists) {
               div(
-                style = "display: flex; gap: 0.5rem;",
+                class = "rids-file-row-actions",
                 downloadButton(
                   ns(dl_id),
                   label = "Download",
@@ -339,28 +333,20 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
                 )
               )
             } else {
-              tags$span(style = "color: #aaa; font-style: italic;", "File not found")
+              tags$span(class = "rids-muted-placeholder", "File not found")
             }
           ),
           div(
-            style = paste(
-              "font-family: monospace;",
-              "font-size: 0.78rem;",
-              "color: #697786;",
-              "background: #f7f9fc;",
-              "padding: 0.4rem 0.6rem;",
-              "border-radius: 4px;",
-              "word-break: break-all;"
-            ),
+            class = "rids-file-path",
             if (is.null(path) || is.na(path) || !nzchar(path)) "—" else path
           )
         )
       }
       
       files_panel <- div(
-        style = "padding: 1rem;",
+        class = "rids-study-panel",
         p(
-          style = "color: #697786; margin-bottom: 1rem;",
+          class = "rids-form-copy rids-study-panel-copy",
           "Files associated with this study. Use Copy path to grab the location for use in your file explorer."
         ),
         file_row("Current ICT workbook", available_workbook_path, "download_ict", "copy_ict"),
@@ -405,30 +391,32 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
         }
 
         div(
-          style = paste(
-            "border: 1px solid #dfe7ee; border-left: 4px solid #1f5f8b;",
-            "border-radius: 0; padding: 1rem; margin-bottom: 0.8rem;",
-            if (identical(version$status[[1]], "archived")) "opacity: 0.68;" else ""
+          class = paste(
+            c(
+              "rids-version-card",
+              if (identical(version$status[[1]], "archived")) "is-archived"
+            ),
+            collapse = " "
           ),
           div(
-            style = "display:flex; justify-content:space-between; gap:1rem; align-items:flex-start; flex-wrap:wrap;",
+            class = "rids-version-card-header",
             div(
               div(
-                style = "font-weight:700; color:#1d2a36;",
+                class = "rids-version-card-title",
                 version_label(version$version_type[[1]], version$effective_from_date[[1]])
               ),
               div(
-                style = "font-size:0.82rem; color:#697786; margin-top:0.25rem;",
+                class = "rids-version-card-meta",
                 paste0("Version ", version$version_number[[1]], " · ", effective,
                        " · ", toupper(version$status[[1]]))
               ),
               div(
-                style = "font-size:0.78rem; color:#87939e; margin-top:0.2rem;",
+                class = "rids-version-upload-meta",
                 paste("Uploaded by", uploader, "on", uploaded)
               )
             ),
             div(
-              style = "display:flex; gap:0.45rem; flex-wrap:wrap;",
+              class = "rids-version-card-actions",
               downloadButton(
                 ns(paste0("download_version_workbook_", version_id)),
                 "ICT workbook",
@@ -467,22 +455,22 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
             )
           ),
           if (!is.na(version$notes[[1]]) && nzchar(version$notes[[1]])) {
-            div(style = "font-size:0.85rem; color:#56636f; margin-top:0.75rem;", version$notes[[1]])
+            div(class = "rids-version-card-notes", version$notes[[1]])
           }
         )
       })
 
       versions_panel <- div(
-        style = "padding: 1rem;",
+        class = "rids-version-panel",
         div(
-          style = "display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-bottom:1rem; flex-wrap:wrap;",
+          class = "rids-version-panel-header",
           p(
-            style = "color:#697786; margin:0; max-width:48rem;",
+            class = "rids-form-copy rids-version-panel-copy",
             "Each amendment is a complete template. Activity performed before its effective date remains on the earlier applicable version."
           ),
           if (any(versions$status == "processing")) {
             span(
-              style = "font-size:0.85rem; color:#8a5b00;",
+              class = "rids-version-processing",
               "Complete or discard the in-progress upload before adding another amendment."
             )
           } else {
@@ -796,7 +784,7 @@ studyWorkspaceServer <- function(id, auth_state, shared_state, current_step) {
         ),
         textAreaInput(ns("amendment_notes"), "Notes", rows = 3),
         div(
-          style = "font-size:0.82rem; color:#697786;",
+          class = "rids-form-help",
           "The workbook must contain the same CPMS ID as this study. It will be processed through the normal RIDS review flow."
         ),
         footer = tagList(

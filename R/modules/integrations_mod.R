@@ -11,16 +11,16 @@ integrationsUI <- function(id) {
         status = "primary",
         solidHeader = FALSE,
         div(
-          style = "display: flex; flex-direction: column; gap: 1rem;",
+          class = "rids-form-stack",
           uiOutput(ns("edge_status")),
           passwordInput(ns("edge_api_key"), "EDGE API key"),
           div(
-            style = "display: flex; gap: 0.75rem; flex-wrap: wrap;",
+            class = "rids-form-actions",
             actionButton(ns("save_edge_api_key"), "Save API key", class = "btn-primary"),
             actionButton(ns("delete_edge_api_key"), "Delete saved key", class = "btn-outline-danger")
           ),
           div(
-            style = "color: #697786; font-size: 0.92rem;",
+            class = "rids-form-copy",
             "Your EDGE API key is stored for your account only and is never shown again after saving."
           )
         )
@@ -31,10 +31,10 @@ integrationsUI <- function(id) {
         status = "white",
         solidHeader = FALSE,
         div(
-          style = "display: flex; flex-direction: column; gap: 0.75rem; color: #1d2a36;",
-          tags$p(style = "margin: 0;", "Use this page to connect your RIDS account to EDGE with your own API key."),
-          tags$p(style = "margin: 0;", "RIDS stores the key securely for your account and will use it later when EDGE workflow actions are added."),
-          tags$p(style = "margin: 0; color: #697786;", "If you remove the key, future EDGE actions will prompt you to add it again.")
+          class = "rids-info-stack",
+          tags$p("Use this page to connect your RIDS account to EDGE with your own API key."),
+          tags$p("RIDS stores the key securely for your account and will use it later when EDGE workflow actions are added."),
+          tags$p(class = "is-muted", "If you remove the key, future EDGE actions will prompt you to add it again.")
         )
       )
     )
@@ -60,8 +60,8 @@ integrationsServer <- function(id, auth_state) {
       if (!isTRUE(status$configured)) {
         return(
           div(
-            style = "padding: 0.8rem 0.9rem; background: #f7f9fc; border-radius: 6px; color: #697786;",
-            tags$strong(style = "color: #1d2a36;", "Status: "),
+            class = "rids-status-panel is-neutral",
+            tags$strong("Status: "),
             "No EDGE API key saved for your account."
           )
         )
@@ -73,18 +73,18 @@ integrationsServer <- function(id, auth_state) {
       }
 
       div(
-        style = "padding: 0.8rem 0.9rem; background: #f1f8ef; border-radius: 6px;",
+        class = "rids-status-panel is-success",
         div(
-          style = "font-weight: 600; color: #2e7d32;",
+          class = "rids-status-title",
           "Configured"
         ),
         div(
-          style = "margin-top: 0.25rem; color: #1d2a36;",
+          class = "rids-status-value",
           paste("Saved key:", status$masked_secret)
         ),
         if (nzchar(updated_label)) {
           div(
-            style = "margin-top: 0.25rem; color: #697786;",
+            class = "rids-status-meta",
             updated_label
           )
         }

@@ -141,4 +141,131 @@ test_that("first-run flow works in a real browser: bootstrap -> TOTP enrollment 
            label = "user badge shows the admin")
   badge <- js("$('#user_badge').text()")
   expect_match(badge, "Admin")
+
+  # Narrow-screen help remains fully visible and keyboard-contained.
+  b$Emulation$setDeviceMetricsOverride(
+    width = 320L,
+    height = 700L,
+    deviceScaleFactor = 1,
+    mobile = FALSE
+  )
+  click("sidebar-new_ict")
+  wait_for("$('#app-step1-help-toggle:visible').length === 1",
+           label = "Step 1 help control visible")
+  expect_true(js(paste(
+    "(function() {",
+    "  var input = document.getElementById('app-step1-mff_split_enabled');",
+    "  var text = input && input.closest('label').querySelector('span');",
+    "  if (!input || !text) return false;",
+    "  var gap = text.getBoundingClientRect().left - input.getBoundingClientRect().right;",
+    "  return gap >= 7;",
+    "})()"
+  )))
+  click("app-step1-help-toggle")
+  wait_for(
+    paste0(
+      "$('#app-step1-help-panel:visible').length === 1 && ",
+      "$('#app-step1-help-panel').attr('aria-hidden') === 'false'"
+    ),
+    label = "help dialog visible"
+  )
+
+  expect_true(js(paste(
+    "(function() {",
+    "  var panel = document.getElementById('app-step1-help-panel');",
+    "  var rect = panel.getBoundingClientRect();",
+    "  return rect.left >= 0 && rect.right <= window.innerWidth + 1;",
+    "})()"
+  )))
+  expect_true(js(paste(
+    "(function() {",
+    "  var panel = document.getElementById('app-step1-help-panel');",
+    "  return panel.contains(document.activeElement);",
+    "})()"
+  )))
+
+  b$Input$dispatchKeyEvent(
+    type = "keyDown", key = "Tab", code = "Tab", windowsVirtualKeyCode = 9L
+  )
+  b$Input$dispatchKeyEvent(
+    type = "keyUp", key = "Tab", code = "Tab", windowsVirtualKeyCode = 9L
+  )
+  expect_true(js(
+    "document.getElementById('app-step1-help-panel').contains(document.activeElement)"
+  ))
+
+  b$Input$dispatchKeyEvent(
+    type = "keyDown", key = "Escape", code = "Escape", windowsVirtualKeyCode = 27L
+  )
+  b$Input$dispatchKeyEvent(
+    type = "keyUp", key = "Escape", code = "Escape", windowsVirtualKeyCode = 27L
+  )
+  wait_for(
+    paste0(
+      "$('#app-step1-help-panel:visible').length === 0 && ",
+      "$('#app-step1-help-toggle').attr('aria-expanded') === 'false'"
+    ),
+    label = "help dialog closed"
+  )
+  wait_for(
+    "document.activeElement === document.getElementById('app-step1-help-toggle')",
+    label = "focus returned to help control"
+  )
+  expect_false(js(paste(
+    "(function() {",
+    "  var help = document.getElementById('app-step1-help-toggle').getBoundingClientRect();",
+    "  var next = document.getElementById('app-step1-next_step').getBoundingClientRect();",
+    "  return !(help.right <= next.left || help.left >= next.right ||",
+    "    help.bottom <= next.top || help.top >= next.bottom);",
+    "})()"
+  )))
+
+  # Shared mobile filter grids stay inside the viewport.
+  js("$('.main-sidebar [data-value=\"tab_library\"]').first().click(); true")
+  wait_for("$('#app-library-search:visible').length === 1",
+           label = "Study Library visible")
+  expect_true(js(paste(
+    "(function() {",
+    "  var bar = document.querySelector('.library-filter-bar');",
+    "  if (!bar) return false;",
+    "  var right = bar.getBoundingClientRect().right + 1;",
+    "  var controls = bar.querySelectorAll('.form-group, .rids-filter-action');",
+    "  return document.documentElement.scrollWidth <= window.innerWidth &&",
+    "    Array.from(controls).every(function(control) {",
+    "      return control.getBoundingClientRect().right <= right;",
+    "    });",
+    "})()"
+  )))
+
+  # Wide admin data stays in a labelled, keyboard-focusable scroll region.
+  js("$('.main-sidebar [data-value=\"tab_admin\"]').first().click(); true")
+  wait_for("$('.rids-admin-users-table:visible').length === 1",
+           label = "Admin users table visible")
+  expect_true(js(paste(
+    "(function() {",
+    "  var region = document.querySelector('.rids-admin-users-table');",
+    "  return document.documentElement.scrollWidth <= window.innerWidth &&",
+    "    region.getAttribute('role') === 'region' &&",
+    "    region.getAttribute('tabindex') === '0' &&",
+    "    region.scrollWidth > region.clientWidth;",
+    "})()"
+  )))
+
+  # Reporting controls expand evenly in the stacked mobile state.
+  js("$('.main-sidebar [data-value=\"tab_reporting\"]').first().click(); true")
+  wait_for("$('#app-reporting-run_report:visible').length === 1",
+           label = "Reporting filters visible")
+  expect_true(js(paste(
+    "(function() {",
+    "  var controls = Array.from(document.querySelectorAll(",
+    "    '.rids-reporting-filters .form-group, .rids-reporting-action'",
+    "  ));",
+    "  if (controls.length < 5) return false;",
+    "  var widths = controls.map(function(control) {",
+    "    return Math.round(control.getBoundingClientRect().width);",
+    "  });",
+    "  return document.documentElement.scrollWidth <= window.innerWidth &&",
+    "    Math.max.apply(null, widths) - Math.min.apply(null, widths) <= 1;",
+    "})()"
+  )))
 })

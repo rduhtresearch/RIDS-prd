@@ -96,11 +96,6 @@ server <- function(input, output, session) {
       ),
       span(
         class = paste("rids-role-chip", if (isTRUE(is_admin(auth_state$role))) "is-admin" else ""),
-        style = sprintf(
-          "background: %s; color: %s;",
-          if (isTRUE(is_admin(auth_state$role))) "#e8f4fd" else "#f0f4f8",
-          if (isTRUE(is_admin(auth_state$role))) "#1f5f8b" else "#6c757d"
-        ),
         tools::toTitleCase(auth_state$role %||% "user")
       )
     )

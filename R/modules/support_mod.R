@@ -10,6 +10,7 @@ supportUI <- function(id) {
     ),
       
     fluidRow(
+        class = "rids-support-grid",
         column(
           width = 6,
           bs4Card(
@@ -20,7 +21,7 @@ supportUI <- function(id) {
             collapsible = FALSE,
             
             p(
-              style = "color: #1d2a36; margin-bottom: 1rem;",
+              class = "rids-support-copy",
               "Found a bug or want to suggest a feature? Submit feedback through ",
               "the RIDS Feedback Portal. Submissions go directly to the development backlog."
             ),
@@ -45,7 +46,7 @@ supportUI <- function(id) {
             collapsible = FALSE,
             
             p(
-              style = "color: #1d2a36; margin-bottom: 1rem;",
+              class = "rids-support-copy",
               "Check the status of reported issues, planned features, and ongoing work ",
               "in the shared task tracker."
             ),
