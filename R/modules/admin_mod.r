@@ -16,7 +16,7 @@ adminUI <- function(id) {
         checkboxInput(ns("user_active"), "Active", value = TRUE),
         passwordInput(ns("temporary_password"), "Temporary password"),
         div(
-          style = "display: flex; gap: 0.75rem; flex-wrap: wrap;",
+          class = "rids-admin-actions",
           actionButton(ns("save_user"), "Save User", class = "btn-primary"),
           actionButton(ns("clear_form"), "New User", class = "btn-secondary"),
           actionButton(ns("toggle_active"), "Deactivate / Reactivate", class = "btn-outline-danger")
@@ -27,7 +27,7 @@ adminUI <- function(id) {
         hr(),
         actionButton(ns("reset_mfa"), "Reset MFA", class = "btn-outline-warning"),
         p(
-          style = "font-size: 0.75rem; color: #697786; margin-top: 0.4rem;",
+          class = "rids-form-help",
           "Clears the selected user's authenticator enrollment and recovery",
           " codes. They will set up two-factor authentication again at their",
           " next sign-in."
@@ -39,7 +39,13 @@ adminUI <- function(id) {
         title = "Users",
         width = 7,
         status = "primary",
-        reactableOutput(ns("users_table"))
+        div(
+          class = "rids-table-scroll rids-admin-users-table rids-interactive-table",
+          role = "region",
+          `aria-label` = "User accounts table",
+          tabindex = "0",
+          reactableOutput(ns("users_table"))
+        )
       )
     ),
     fluidRow(
@@ -48,26 +54,26 @@ adminUI <- function(id) {
         width = 12,
         status = "primary",
         div(
-          style = "display: flex; flex-direction: column; gap: 1.5rem;",
+          class = "rids-admin-settings-list",
           div(
-            style = "display: flex; gap: 1rem;",
+            class = "rids-admin-setting-row",
             div(
-              style = "width: 500px;",
+              class = "rids-admin-setting-field",
               textInput(ns("ict_dir"), "ICT Upload Directory", value = ICT_UPLOAD_DIR, width = "100%")
             ),
             div(
-              style = "padding-top: 31px;",
+              class = "rids-admin-setting-action",
               actionButton(ns("save_ict_dir"), "Save", class = "btn-primary")
             )
           ),
           div(
-            style = "display: flex; gap: 1rem;",
+            class = "rids-admin-setting-row",
             div(
-              style = "width: 500px;",
+              class = "rids-admin-setting-field",
               textInput(ns("edge_dir"), "EDGE Output Directory", value = EDGE_OUTPUT_DIR, width = "100%")
             ),
             div(
-              style = "padding-top: 31px;",
+              class = "rids-admin-setting-action",
               actionButton(ns("save_edge_dir"), "Save", class = "btn-primary")
             )
           )
@@ -402,38 +408,24 @@ adminServer <- function(id, auth_state) {
       if (nrow(files) == 0) {
         return(
           div(
-            style = "color: #697786;",
+            class = "rids-muted-placeholder",
             "No app log files found yet."
           )
         )
       }
 
       div(
-        style = paste(
-          "display: flex;",
-          "flex-direction: column;",
-          "gap: 0.75rem;",
-          "max-height: 420px;",
-          "overflow-y: auto;",
-          "padding-right: 0.25rem;"
-        ),
+        class = "rids-admin-log-list",
         lapply(seq_len(nrow(files)), function(i) {
           row <- files[i, , drop = FALSE]
 
           div(
-            style = paste(
-              "display: flex;",
-              "justify-content: space-between;",
-              "align-items: center;",
-              "gap: 1rem;",
-              "padding: 0.75rem 1rem;",
-              "border: 1px solid #e9ecef;",
-              "border-radius: 0.5rem;"
-            ),
+            class = "rids-admin-log-row",
             div(
-              div(style = "font-weight: 600; color: #1d2a36;", row$file_name[[1]]),
+              class = "rids-admin-log-copy",
+              div(class = "rids-admin-log-name", row$file_name[[1]]),
               div(
-                style = "font-size: 0.85rem; color: #697786;",
+                class = "rids-admin-log-meta",
                 paste0("Modified: ", row$modified_at[[1]], " | Size: ", row$size_kb[[1]], " KB")
               )
             ),

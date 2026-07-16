@@ -351,8 +351,9 @@ libraryServer <- function(id, auth_state, shared_state) {
       if (nrow(studies()) == 0) {
         return(
           div(
-            style = "padding: 1rem; color: #697786;",
-            "No studies are available in the library yet."
+            class = "rids-empty-state rids-library-empty",
+            div(class = "rids-empty-icon", icon("book-open")),
+            p("No studies are available in the library yet.")
           )
         )
       }
@@ -360,15 +361,10 @@ libraryServer <- function(id, auth_state, shared_state) {
       if (total_matches == 0) {
         return(
           div(
-            style = "padding: 1rem;",
-            div(
-              style = "font-size: 0.95rem; font-weight: 600; color: #1d2a36; margin-bottom: 0.4rem;",
-              "0 studies match the current filters"
-            ),
-            div(
-              style = "color: #697786;",
-              "Try broadening your search or clearing one or more filters."
-            )
+            class = "rids-empty-state rids-library-empty",
+            div(class = "rids-empty-icon", icon("filter")),
+            h2("0 studies match the current filters"),
+            p("Try broadening your search or clearing one or more filters.")
           )
         )
       }
@@ -377,15 +373,9 @@ libraryServer <- function(id, auth_state, shared_state) {
 
       tagList(
         div(
-          style = paste(
-            "display: flex;",
-            "justify-content: space-between;",
-            "align-items: center;",
-            "gap: 1rem;",
-            "padding: 1rem 1rem 0.25rem;"
-          ),
+          class = "rids-library-summary",
           div(
-            style = "font-size: 0.92rem; color: #1d2a36; font-weight: 600;",
+            class = "rids-library-summary-count",
             paste0(
               format(total_matches, big.mark = ","),
               if (total_matches == 1) " study" else " studies",
@@ -393,7 +383,7 @@ libraryServer <- function(id, auth_state, shared_state) {
             )
           ),
           div(
-            style = "font-size: 0.82rem; color: #697786;",
+            class = "rids-library-summary-visible",
             paste0(
               "Showing ",
               format(shown_matches, big.mark = ","),
@@ -403,7 +393,7 @@ libraryServer <- function(id, auth_state, shared_state) {
           )
         ),
         div(
-          style = "display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; padding: 0.75rem 1rem 1rem;",
+          class = "rids-library-grid",
           lapply(seq_len(nrow(data)), function(i) {
             row <- data[i, ]
             open_key_json <- jsonlite::toJSON(
@@ -418,65 +408,59 @@ libraryServer <- function(id, auth_state, shared_state) {
             )
 
             div(
-              class = "card",
-              style = "border: 1px solid #f0f4f8; border-radius: 0.75rem; box-shadow: 0 2px 12px rgba(18,34,48,0.06);",
+              class = "card rids-study-card",
               div(
-                class = "card-body",
-                style = "padding: 1.25rem;",
+                class = "card-body rids-study-card-body",
                 div(
-                  style = "font-size: 1rem; font-weight: 700; color: #1d2a36; margin-bottom: 0.75rem;",
+                  class = "rids-study-card-title",
                   row$study_name %||% paste0("CPMS ", row$cpms_id)
                 ),
                 div(
-                  style = "display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1rem;",
+                  class = "rids-study-chips",
                   span(
-                    style = "background: #e8f4fd; color: #1f5f8b; padding: 0.2rem 0.65rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600;",
+                    class = "rids-study-chip is-scenario",
                     paste0("Scenario ", row$scenario_id %||% "Unknown")
                   ),
                   span(
-                    style = "background: #edf7ed; color: #1f6f43; padding: 0.2rem 0.65rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600;",
+                    class = "rids-study-chip is-site",
                     row$study_site %||% "Site unknown"
                   ),
                   span(
-                    style = "background: #f7f1df; color: #7c5d16; padding: 0.2rem 0.65rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600;",
+                    class = "rids-study-chip is-speciality",
                     row$speciality_name %||% "Speciality unknown"
                   ),
                   span(
-                    style = "background: #f0f4f8; color: #697786; padding: 0.2rem 0.65rem; border-radius: 1rem; font-size: 0.75rem; font-weight: 600;",
+                    class = "rids-study-chip is-edge",
                     paste0("EDGE: ", row$edge_id %||% "Not set")
                   )
                 ),
                 div(
-                  style = "display: flex; flex-direction: column; gap: 0.35rem; margin-bottom: 1rem;",
+                  class = "rids-study-meta",
                   div(
-                    style = "display: flex; align-items: center; gap: 0.5rem;",
-                    span(style = "font-size: 0.75rem; color: #697786;", icon("hashtag")),
-                    span(style = "font-size: 0.82rem; color: #1d2a36;", paste0("CPMS ", row$cpms_id %||% "Unknown"))
+                    class = "rids-study-meta-row",
+                    span(class = "rids-study-meta-icon", icon("hashtag")),
+                    span(class = "rids-study-meta-value", paste0("CPMS ", row$cpms_id %||% "Unknown"))
                   ),
                   div(
-                    style = "display: flex; align-items: center; gap: 0.5rem;",
-                    span(style = "font-size: 0.75rem; color: #697786;", icon("user")),
-                    span(style = "font-size: 0.82rem; color: #1d2a36;", row$uploaded_by %||% "Unknown uploader")
+                    class = "rids-study-meta-row",
+                    span(class = "rids-study-meta-icon", icon("user")),
+                    span(class = "rids-study-meta-value", row$uploaded_by %||% "Unknown uploader")
                   ),
                   div(
-                    style = "display: flex; align-items: center; gap: 0.5rem;",
-                    span(style = "font-size: 0.75rem; color: #697786;", icon("clock")),
+                    class = "rids-study-meta-row",
+                    span(class = "rids-study-meta-icon", icon("clock")),
                     span(
-                      style = "font-size: 0.82rem; color: #1d2a36;",
+                      class = "rids-study-meta-value",
                       format(as.POSIXct(row$upload_timestamp), "%d %b %Y %H:%M")
                     )
                   )
                 ),
                 div(
-                  style = paste(
-                    "border-top: 1px solid #f0f4f8; padding-top: 0.75rem;",
-                    "display: flex; gap: 0.5rem; justify-content: space-between;"
-                  ),
+                  class = "rids-study-actions",
                   actionButton(
                     inputId = ns(paste0("open_study_", i)),
                     label   = tagList(icon("folder-open"), " Open"),
-                    class   = "btn btn-sm btn-outline-primary",
-                    style   = "font-size: 0.8rem; font-weight: 600; flex: 1 1 auto;",
+                    class   = "btn btn-sm btn-outline-primary rids-study-action is-primary",
                     onclick = sprintf(
                       "Shiny.setInputValue('%s', %s, {priority: 'event'})",
                       ns("open_study"),
@@ -486,8 +470,7 @@ libraryServer <- function(id, auth_state, shared_state) {
                   actionButton(
                     inputId = ns(paste0("delete_study_", i)),
                     label   = tagList(icon("trash"), " Delete"),
-                    class   = "btn btn-sm btn-outline-danger",
-                    style   = "font-size: 0.8rem; font-weight: 600;",
+                    class   = "btn btn-sm btn-outline-danger rids-study-action",
                     onclick = sprintf(
                       "Shiny.setInputValue('%s', %s, {priority: 'event'})",
                       ns("delete_study"),
@@ -501,7 +484,7 @@ libraryServer <- function(id, auth_state, shared_state) {
         ),
         if (shown_matches < total_matches) {
           div(
-            style = "display: flex; justify-content: center; padding: 0 1rem 1.25rem;",
+            class = "rids-library-load-more",
             actionButton(
               ns("load_more"),
               label = paste0("Load more (", total_matches - shown_matches, " remaining)"),

@@ -81,16 +81,16 @@ edge_cost_events_filter_controls <- function(ns, mode) {
 
   tagList(
     div(
-      class = "rids-filter-bar rids-inline-filters",
+      class = "rids-filter-bar rids-inline-filters rids-reporting-filters",
       date_fields,
       textInput(ns("period"), "Period (optional)", value = "", placeholder = "EDGE period value", width = "260px"),
       div(
-        style = "align-self: flex-end; margin-bottom: 1rem;",
+        class = "rids-reporting-action",
         actionButton(ns("run_report"), "Run report", icon = icon("play"), class = "btn-primary")
       )
     ),
     tags$small(
-      style = "display: block; margin-top: -0.5rem; color: #697786;",
+      class = "rids-reporting-hint",
       "Period is passed to EDGE exactly as entered. Leave it blank unless you know the period value used in your EDGE configuration."
     )
   )
@@ -373,7 +373,12 @@ reportingUI <- function(id) {
       status = "white",
       solidHeader = FALSE,
       uiOutput(ns("report_status")),
-      reactableOutput(ns("cost_events_table"))
+      div(
+        class = "rids-table-region",
+        role = "region",
+        `aria-label` = "Project and site cost events table",
+        reactableOutput(ns("cost_events_table"))
+      )
     )
   )
 }

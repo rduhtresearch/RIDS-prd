@@ -15,7 +15,12 @@ step3_UI <- function(id) {
         actionButton(ns("save"), "Save", class = "btn-success"),
         actionButton(ns("next_step"), "Next: Generate Templates", class = "pipeline-next-btn")
       ),
-      reactableOutput(ns("table"))
+      div(
+        class = "rids-table-region rids-interactive-table",
+        role = "region",
+        `aria-label` = "Posting line tags table",
+        reactableOutput(ns("table"))
+      )
     )
   )
 }

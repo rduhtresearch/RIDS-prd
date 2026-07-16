@@ -166,13 +166,7 @@ edgeBuilderUI <- function(id) {
         width = 8,
         h4(textOutput(ns("active_title"))),
         div(
-          style = paste(
-            "display: flex;",
-            "gap: 0.75rem;",
-            "align-items: flex-end;",
-            "flex-wrap: wrap;",
-            "margin: 0.25rem 0 0.75rem;"
-          ),
+          class = "rids-edge-builder-filters",
           selectInput(
             ns("department_filter"),
             "Department",
@@ -187,12 +181,17 @@ edgeBuilderUI <- function(id) {
             width = "180px"
           )
         ),
-        reactableOutput(ns("rows_table")),
         div(
-          style = "margin-top: 0.5rem; display: flex; align-items: center; gap: 1rem;",
+          class = "rids-table-region rids-interactive-table",
+          role = "region",
+          `aria-label` = "Template activity rows table",
+          reactableOutput(ns("rows_table"))
+        ),
+        div(
+          class = "rids-edge-builder-actions",
           actionButton(ns("move_selected"), "Move selected...", class = "btn-primary"),
           span(
-            style = "font-size: 0.85rem; color: #697786;",
+            class = "rids-edge-builder-selection",
             textOutput(ns("selected_count"), inline = TRUE)
           )
         )
@@ -324,14 +323,7 @@ edgeBuilderServer <- function(id, edge_templates,
         lapply(names(sections), function(section_name) {
           tagList(
             div(
-              style = paste(
-                "margin: 0.9rem 0 0.25rem;",
-                "font-size: 0.78rem;",
-                "font-weight: 700;",
-                "letter-spacing: 0.02em;",
-                "text-transform: uppercase;",
-                "color: #697786;"
-              ),
+              class = "rids-edge-template-section",
               section_name
             ),
             lapply(sections[[section_name]], function(nm) {
@@ -342,17 +334,17 @@ edgeBuilderServer <- function(id, edge_templates,
                 if (edited) {
                   tags$i(
                     class = "fas fa-pen edge-builder-template-icon",
-                    title = "Edited",
-                    style = "margin-left: 0.35rem; color: #b7791f;"
+                    title = "Edited"
                   )
                 }
               )
 
               div(
-                style = "padding: 0.4rem 0;",
+                class = "rids-edge-template-item",
                 actionLink(
                   inputId = ns(paste0("sel_", nm)),
-                  label   = label
+                  label   = label,
+                  class = "rids-edge-template-link"
                 )
               )
             })
@@ -412,16 +404,7 @@ edgeBuilderServer <- function(id, edge_templates,
             cell = function(value) {
               if (is.na(value) || value == "") return("—")
               tags$span(
-                style = paste(
-                  "display: inline-block;",
-                  "background: #e8f0f7;",
-                  "color: #1f5f8b;",
-                  "padding: 0.15rem 0.6rem;",
-                  "border-radius: 12px;",
-                  "font-size: 0.78rem;",
-                  "font-weight: 500;",
-                  "white-space: nowrap;"
-                ),
+                class = "rids-edge-department-chip",
                 value
               )
             },

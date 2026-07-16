@@ -328,14 +328,9 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       if (!identical(display_mode, "ready")) {
         return(
           div(
-            style = paste(
-              "padding: 1rem;",
-              "border-radius: 6px;",
-              "background: #f7f9fb;",
-              "color: #697786;"
-            ),
+            class = "rids-step4-pending",
             div(
-              style = "font-weight: 600; color: #1d2a36; margin-bottom: 0.35rem;",
+              class = "rids-step4-pending-title",
               "Preparing template output"
             ),
             div(
@@ -348,17 +343,25 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
 
       tagList(
         div(
-          style = "display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;",
-          selectInput(
-            session$ns("arm_select"),
-            label = "Study Arm",
-            choices = step4_available_preview_arms(current_preview_templates()),
-            selected = step4_effective_preview_arm(input$arm_select, current_preview_templates()),
-            width = "200px"
+          class = "rids-step4-arm-row",
+          div(
+            class = "rids-step4-arm-field",
+            selectInput(
+              session$ns("arm_select"),
+              label = "Study Arm",
+              choices = step4_available_preview_arms(current_preview_templates()),
+              selected = step4_effective_preview_arm(input$arm_select, current_preview_templates()),
+              width = "100%"
+            )
           ),
           uiOutput(session$ns("save_status"))
         ),
-        reactableOutput(session$ns("preview_table")),
+        div(
+          class = "rids-table-region",
+          role = "region",
+          `aria-label` = "EDGE template preview table",
+          reactableOutput(session$ns("preview_table"))
+        ),
         hr(),
         h4("Template builder (preview)"),
         edgeBuilderUI(session$ns("edge_builder")),
@@ -380,28 +383,23 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
 
       tagList(
         div(
-          style = paste(
-            "margin-bottom: 1rem;",
-            "padding: 0.9rem 1rem;",
-            "border-radius: 6px;",
-            "background: #fff4f2;"
-          ),
+          class = "rids-step4-validation-error",
           div(
-            style = "font-weight: 600; color: #8e2f23; margin-bottom: 0.35rem;",
+            class = "rids-step4-validation-title",
             "Cost centre matrix validation failed"
           ),
           div(
-            style = "color: #8e2f23;",
+            class = "rids-step4-validation-copy",
             "The study was not processed. Review the unmatched conditions below, download the report if needed, then start again from step 1."
           ),
           if (!is.null(rollback_message)) {
             div(
-              style = "margin-top: 0.5rem; font-weight: 600; color: #8e2f23;",
+              class = "rids-step4-validation-rollback",
               rollback_message
             )
           },
           div(
-            style = "margin-top: 0.75rem;",
+            class = "rids-step4-validation-actions",
             if (is.data.frame(unmatched) && nrow(unmatched) > 0) {
               downloadButton(
                 session$ns("download_unmatched_cost_centres"),
@@ -412,7 +410,12 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
           )
         ),
         if (is.data.frame(unmatched_summary) && nrow(unmatched_summary) > 0) {
-          reactableOutput(session$ns("unmatched_cost_centres_table"))
+          div(
+            class = "rids-table-region",
+            role = "region",
+            `aria-label` = "Unmatched cost centre conditions table",
+            reactableOutput(session$ns("unmatched_cost_centres_table"))
+          )
         }
       )
     })
@@ -885,10 +888,10 @@ step4_Server <- function(id, auth_state, shared_state, current_step) {
       req(identical(current_display_mode(), "ready"))
       req(zip_path())
       div(
-        style = "display: flex; align-items: center; gap: 0.5rem;",
-        span(style = "color: #28a745; font-size: 1.2rem;", "✓"),
+        class = "rids-step4-save-status",
+        span(class = "rids-step4-save-icon", `aria-hidden` = "true", "✓"),
         span(
-          style = "font-size: 0.85rem; color: #697786;",
+          class = "rids-step4-save-path",
           paste0("Saved to: ", zip_path())
         )
       )

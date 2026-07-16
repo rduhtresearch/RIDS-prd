@@ -45,17 +45,61 @@ suppressPackageStartupMessages({
 .field_hint <- function(touched, error_msg, hint = NULL) {
   if (isTRUE(touched) && !is.null(error_msg)) {
     span(
-      style = "color: #c0392b; font-size: 0.78rem; display: inline-block; margin-top: 0.15rem;",
+      class = "ca-field-hint is-error",
       error_msg
     )
   } else if (!is.null(hint)) {
     span(
-      style = "color: #9aa4ad; font-size: 0.78rem; display: inline-block; margin-top: 0.15rem;",
+      class = "ca-field-hint",
       hint
     )
   } else {
     NULL
   }
+}
+
+custom_activity_mode_control <- function(ns) {
+  div(
+    class = "ca-mode-row",
+    span(
+      id = ns("mode_left_label"),
+      class = "ca-mode-label is-active",
+      "Single cost centre"
+    ),
+    tags$label(
+      class = "ca-mode-switch",
+      tags$input(
+        id = ns("modal_mode_switch"),
+        class = "ca-mode-switch-input",
+        type = "checkbox",
+        `aria-label` = "Use baseline five-row cost mode",
+        `aria-describedby` = paste(
+          ns("mode_left_label"),
+          ns("mode_right_label")
+        ),
+        onclick = sprintf(
+          "Shiny.setInputValue('%s', this.checked ? '%s' : '%s')",
+          ns("modal_mode"), .CA_MODE_RIGHT_VALUE, .CA_MODE_LEFT_VALUE
+        )
+      ),
+      tags$span(
+        class = "ca-mode-switch-track",
+        `aria-hidden` = "true",
+        tags$span(class = "ca-switch-knob")
+      )
+    ),
+    span(
+      id = ns("mode_right_label"),
+      class = "ca-mode-label",
+      "Baseline (5 rows)"
+    ),
+    tags$script(HTML(sprintf("\n      (function(){\n        var cb = document.getElementById('%s');\n        var leftLbl = document.getElementById('%s');\n        var rightLbl = document.getElementById('%s');\n        function refresh(){\n          leftLbl.classList.toggle('is-active', !cb.checked);\n          rightLbl.classList.toggle('is-active', cb.checked);\n        }\n        cb.addEventListener('change', refresh);\n        refresh();\n        Shiny.setInputValue('%s', '%s');\n      })();\n    ",
+      ns("modal_mode_switch"),
+      ns("mode_left_label"),
+      ns("mode_right_label"),
+      ns("modal_mode"), .CA_MODE_LEFT_VALUE
+    )))
+  )
 }
 
 .ca_as_scalar_num <- function(x) {
@@ -215,19 +259,24 @@ customActivityUI <- function(id) {
     ),
     
     div(
-      style = "margin-bottom: 1rem; color: #697786; font-size: 0.9rem;",
+      class = "rids-form-copy rids-custom-activity-intro",
       "Add activities not captured in the ICT workbook. ",
       "Custom activities are appended at export."
     ),
     
     div(
-      style = "display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;",
+      class = "rids-custom-activity-actions",
       actionButton(ns("open_add"), "Add activity",
                    class = "btn-primary", icon = icon("plus")),
       uiOutput(ns("count_status"))
     ),
     
-    reactableOutput(ns("summary_table"))
+    div(
+      class = "rids-table-region rids-interactive-table",
+      role = "region",
+      `aria-label` = "Custom activities summary table",
+      reactableOutput(ns("summary_table"))
+    )
   )
 }
 
@@ -358,11 +407,10 @@ customActivityServer <- function(id, auth_state, shared_state, study_arm_choices
     output$count_status <- renderUI({
       n <- nrow(customs())
       if (n == 0) {
-        span(style = "color: #697786; font-size: 0.85rem;",
-             "No custom activities added.")
+        span(class = "rids-custom-activity-count", "No custom activities added.")
       } else {
         total <- sum(customs()$amount, na.rm = TRUE)
-        span(style = "color: #1f5f8b; font-size: 0.85rem;",
+        span(class = "rids-custom-activity-count has-activities",
              sprintf("%d activit%s · total %s",
                      n_distinct(customs()$custom_activity_id),
                      if (n_distinct(customs()$custom_activity_id) == 1) "y" else "ies",
@@ -488,77 +536,7 @@ customActivityServer <- function(id, auth_state, shared_state, study_arm_choices
           # ── Section 2: mode switch ────────────────────────────────────
           div(class = "ca-modal-section",
               div(class = "ca-section-label", "Cost mode"),
-              div(
-                style = paste(
-                  "display: flex; align-items: center; gap: 1rem;",
-                  "padding: 0.65rem 0.85rem; background: #fafbfc;",
-                  "border-radius: 3px; border: 1px solid #e1e5eb;"
-                ),
-                span(
-                  id = ns("mode_left_label"),
-                  style = "font-size: 0.9rem; color: #1d2a36; font-weight: 600;",
-                  "Single cost centre"
-                ),
-                tags$label(
-                  class = "switch",
-                  style = "position: relative; display: inline-block; width: 48px; height: 24px; margin: 0;",
-                  tags$input(
-                    id      = ns("modal_mode_switch"),
-                    type    = "checkbox",
-                    style   = "opacity: 0; width: 0; height: 0;",
-                    onclick = sprintf(
-                      "Shiny.setInputValue('%s', this.checked ? '%s' : '%s')",
-                      ns("modal_mode"), .CA_MODE_RIGHT_VALUE, .CA_MODE_LEFT_VALUE
-                    )
-                  ),
-                  tags$span(
-                    style = paste(
-                      "position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0;",
-                      "background-color:#1f5f8b; border-radius:24px; transition:.2s;"
-                    ),
-                    tags$span(
-                      class = "ca-switch-knob",
-                      style = paste(
-                        "position:absolute; height:18px; width:18px;",
-                        "left:3px; bottom:3px; background-color:white;",
-                        "border-radius:50%; transition:.2s;"
-                      )
-                    )
-                  )
-                ),
-                span(
-                  id = ns("mode_right_label"),
-                  style = "font-size: 0.9rem; color: #1d2a36; font-weight: 600;",
-                  "Baseline (5 rows)"
-                ),
-                tags$script(HTML(sprintf("
-                  (function(){
-                    var cb = document.getElementById('%s');
-                    var leftLbl  = document.getElementById('%s');
-                    var rightLbl = document.getElementById('%s');
-                    function refresh(){
-                      var knob = cb.parentNode.querySelector('.ca-switch-knob');
-                      if (cb.checked) {
-                        knob.style.transform = 'translateX(24px)';
-                        leftLbl.style.opacity  = '0.45';
-                        rightLbl.style.opacity = '1';
-                      } else {
-                        knob.style.transform = 'translateX(0)';
-                        leftLbl.style.opacity  = '1';
-                        rightLbl.style.opacity = '0.45';
-                      }
-                    }
-                    cb.addEventListener('change', refresh);
-                    refresh();
-                    Shiny.setInputValue('%s', '%s');
-                  })();
-                ",
-                                         ns("modal_mode_switch"),
-                                         ns("mode_left_label"),
-                                         ns("mode_right_label"),
-                                         ns("modal_mode"), .CA_MODE_LEFT_VALUE
-                )))
-              )
+              custom_activity_mode_control(ns)
           ),
           
           # ── Section 3a: single CC ──────────────────────────────────────

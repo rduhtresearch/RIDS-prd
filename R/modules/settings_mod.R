@@ -36,7 +36,7 @@ settingsServer <- function(id, auth_state) {
         tags$p(tags$strong("Username: "), auth_state$username %||% ""),
         tags$p(tags$strong("Role: "), tools::toTitleCase(auth_state$role %||% "user")),
         tags$p(
-          style = "color: #697786; margin-bottom: 0;",
+          class = "rids-form-copy mb-0",
           "Password changes take effect immediately for your account."
         )
       )

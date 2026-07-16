@@ -356,7 +356,7 @@ loginServer <- function(id) {
         style = "text-align: left; word-break: break-all;",
         p(tags$strong("Setup key: "), tags$code(enrollment$secret)),
         p(
-          style = "font-size: 0.7rem;",
+          class = "login-provisioning-url",
           "Or add by URL: ",
           tags$code(enrollment$provisioning_uri)
         )

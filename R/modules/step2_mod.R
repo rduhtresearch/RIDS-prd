@@ -224,7 +224,9 @@ step2_UI <- function(id) {
         "Select any row to adjust its contract cost."
       ),
       div(
-        class = "step2-table-lock-frame",
+        class = "step2-table-lock-frame rids-table-region rids-interactive-table",
+        role = "region",
+        `aria-label` = "Contract cost review table",
         reactableOutput(ns("table"))
       )
     )
