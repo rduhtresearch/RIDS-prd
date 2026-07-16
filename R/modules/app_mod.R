@@ -44,6 +44,7 @@ appUI <- function(id) {
       ),
       tabItem("tab_reporting", reportingUI(NS(id, "reporting"))),
       tabItem("tab_settings",  settingsUI(NS(id, "settings"))),
+      tabItem("tab_cost_centre_matrix", costCentreMatrixUI(NS(id, "cost_centre_matrix"))),
       tabItem("tab_integrations", integrationsUI(NS(id, "integrations"))),
       tabItem("tab_library",   libraryUI(NS(id, "library"))),
       tabItem("tab_study",     studyWorkspaceUI(NS(id, "study_workspace"))),
@@ -132,6 +133,7 @@ appServer <- function(id, auth_state, current_step) {
     progressServer("progress", current_step, shared_state)
     reportingServer("reporting", auth_state)
     settingsServer("settings", auth_state)
+    costCentreMatrixServer("cost_centre_matrix", auth_state)
     integrationsServer("integrations", auth_state)
     libraryServer("library", auth_state, shared_state)
     supportServer("support", auth_state)
