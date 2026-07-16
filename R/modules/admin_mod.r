@@ -3,7 +3,7 @@ adminUI <- function(id) {
 
   div(
     class = "rids-page rids-admin-page rids-form-page",
-    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Administration"), h1("Admin"), p("Manage access, application settings and operational files.")), div(class = "rids-page-mark", icon("users-cog"))),
+    div(class = "rids-page-header", div(div(class = "rids-page-eyebrow", "Administration"), h1("Admin"), p("Manage access, application settings and logs.")), div(class = "rids-page-mark", icon("users-cog"))),
     fluidRow(
       bs4Card(
         title = "User Management",
@@ -70,25 +70,6 @@ adminUI <- function(id) {
               style = "padding-top: 31px;",
               actionButton(ns("save_edge_dir"), "Save", class = "btn-primary")
             )
-          ),
-          hr(style = "margin: 0;"),
-          div(
-            style = "display: flex; flex-direction: column; gap: 0.85rem;",
-            div(
-              style = "font-weight: 600; color: #1d2a36;",
-              "Cost Centre Matrix"
-            ),
-            uiOutput(ns("cost_centre_matrix_current")),
-            fileInput(
-              ns("cost_centre_matrix_upload"),
-              "Upload matrix CSV",
-              accept = c(".csv")
-            ),
-            uiOutput(ns("cost_centre_matrix_validation")),
-            div(
-              style = "display: flex; gap: 1rem; align-items: center;",
-              actionButton(ns("save_cost_centre_matrix"), "Save matrix", class = "btn-primary")
-            )
           )
         )
       )
@@ -130,65 +111,6 @@ adminServer <- function(id, auth_state) {
       invalidateLater(5000, session)
       prune_app_run_log_files(retention_hours = 24L)
       list_app_run_log_files()
-    })
-
-    current_cost_centre_matrix <- reactive({
-      refresh()
-      list(
-        file_path = cc_get_setting("cost_centre_matrix_file", "")
-      )
-    })
-
-    output$cost_centre_matrix_current <- renderUI({
-      current <- current_cost_centre_matrix()
-
-      if (!nzchar(current$file_path)) {
-        return(
-          div(
-            style = "color: #697786;",
-            "No cost centre matrix is currently configured."
-          )
-        )
-      }
-
-      validation <- validate_cost_centre_matrix_file(current$file_path)
-
-      div(
-        style = "padding: 0.75rem 0.9rem; background: #f7f9fc; border-radius: 6px;",
-        div(style = "font-weight: 600; color: #1d2a36;", "Current active matrix"),
-        div(style = "margin-top: 0.35rem; color: #697786;", paste("File:", current$file_path)),
-        div(
-          style = paste(
-            "margin-top: 0.35rem;",
-            if (isTRUE(validation$valid)) "color: #2e7d32;" else "color: #c0392b;"
-          ),
-          validation$message
-        )
-      )
-    })
-
-    output$cost_centre_matrix_validation <- renderUI({
-      upload <- input$cost_centre_matrix_upload
-
-      if (is.null(upload) || is.null(upload$datapath) || !file.exists(upload$datapath)) {
-        return(
-          div(
-            style = "color: #697786;",
-            "Upload a CSV file to validate it."
-          )
-        )
-      }
-
-      validation <- validate_cost_centre_matrix_file(upload$datapath)
-
-      div(
-        style = paste(
-          "padding: 0.65rem 0.8rem;",
-          "border-radius: 6px;",
-          if (isTRUE(validation$valid)) "background: #f1f8ef; color: #2e7d32;" else "background: #fff4f2; color: #c0392b;"
-        ),
-        validation$message
-      )
     })
 
     observeEvent(input$save_ict_dir, {
@@ -233,52 +155,6 @@ adminServer <- function(id, auth_state) {
       }, error = function(e) {
         app_log_exception("admin", "EDGE output directory save failed", e)
         showNotification("Failed to save settings", type = "error")
-      })
-    })
-
-    observeEvent(input$save_cost_centre_matrix, {
-      req(isTRUE(is_admin(auth_state$role)))
-
-      upload <- input$cost_centre_matrix_upload
-
-      if (is.null(upload) || is.null(upload$datapath) || !file.exists(upload$datapath)) {
-        showNotification("Upload a cost centre matrix CSV first.", type = "warning")
-        return()
-      }
-
-      validation <- validate_cost_centre_matrix_file(upload$datapath)
-      if (!isTRUE(validation$valid)) {
-        showNotification(validation$message, type = "error", duration = 10)
-        return()
-      }
-
-      tryCatch({
-        matrix_dir <- file.path(ICT_UPLOAD_DIR, "cost_centre_matrices")
-        if (!dir.exists(matrix_dir)) dir.create(matrix_dir, recursive = TRUE)
-
-        saved_path <- file.path(matrix_dir, "active_cost_centre_matrix.csv")
-        file.copy(upload$datapath, saved_path, overwrite = TRUE)
-
-        set_app_setting_value("cost_centre_matrix_file", saved_path)
-
-        log_event(
-          level = "INFO",
-          area = "admin",
-          message = "Cost centre matrix updated",
-          user_id = auth_state$user_id,
-          username = auth_state$username,
-          session_id = auth_state$session_id,
-          details = list(
-            setting_key = "cost_centre_matrix",
-            file_path = saved_path
-          )
-        )
-
-        showNotification("Cost centre matrix saved.", type = "message", duration = 5)
-        refresh(refresh() + 1L)
-      }, error = function(e) {
-        app_log_exception("admin", "Cost centre matrix save failed", e)
-        showNotification("Failed to save cost centre matrix", type = "error")
       })
     })
 

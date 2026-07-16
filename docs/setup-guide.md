@@ -328,10 +328,15 @@ The **Admin** tab (visible to `admin` role only):
   recovery codes; they re-enroll at their next sign-in. This is the
   recovery path when someone loses both their device and their recovery
   codes. Every reset is written to the auth audit log.
-- **Settings**: upload/output directories, cost-centre matrix file, log
-  retention.
+- **Settings**: upload and output directories.
 - **Logs**: query the in-app audit/application logs and download the
   per-run log files.
+
+The **Operations → Cost Centre Matrix** tab is visible to all signed-in users.
+It shows the current matrix, its active split columns and a searchable row
+viewer. Administrators can upload and validate a CSV or XLSX replacement,
+review split-column changes and confirm activation. **Operations →
+Integrations** contains each user's external-system credentials.
 
 Security-relevant events (logins, failures, resets, MFA enrollment and
 resets, session revocations) are recorded in the `auth_audit_log` table.

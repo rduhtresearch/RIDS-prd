@@ -81,6 +81,18 @@ run_cost_centre_matrix_simple_tests <- function() {
   .ccm_expect("valid matrix CSV passes validation", isTRUE(valid$valid))
   .ccm_expect("validation detects split columns", length(valid$split_columns) == 4L)
   .ccm_expect("non-split columns are ignored", !"Tab" %in% valid$split_columns)
+  .ccm_expect("validation reports matrix row count", identical(valid$row_count, 3L))
+  .ccm_expect("validation reports matrix column count", identical(valid$column_count, 9L))
+  .ccm_expect("validation reports populated split rows", identical(unname(valid$populated_counts["DIRECT"]), 3L))
+
+  xlsx_path <- tempfile(fileext = ".xlsx")
+  openxlsx::write.xlsx(
+    read.csv(matrix_path, check.names = FALSE, colClasses = "character"),
+    xlsx_path
+  )
+  valid_xlsx <- validate_cost_centre_matrix_file(xlsx_path)
+  .ccm_expect("valid matrix XLSX passes validation", isTRUE(valid_xlsx$valid))
+  .ccm_expect("XLSX validation detects split columns", length(valid_xlsx$split_columns) == 4L)
 
   dbExecute(con, "INSERT INTO app_settings (key, value) VALUES ('cost_centre_matrix_file', ?)", params = list(matrix_path))
 

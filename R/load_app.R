@@ -61,6 +61,7 @@ RIDS_MODULE_FILES <- c(
   "R/modules/app_mod.R",
   "R/modules/reporting_mod.R",
   "R/modules/settings_mod.R",
+  "R/modules/cost_centre_matrix_mod.R",
   "R/modules/integrations_mod.R",
   "R/modules/step1_mod.R",
   "R/modules/step2_mod.R",

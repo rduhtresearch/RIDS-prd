@@ -31,6 +31,7 @@ SPECIALITY_CC_LOOKUP <- tribble(
 COST_CENTRE_MATRIX_REQUIRED_COLUMNS <- c("Department", "Activity Type", "Staff Role")
 COST_CENTRE_MATRIX_SPECIALITY_TOKEN <- cc_normalize_text("Speciality")
 COST_CENTRE_MATRIX_EXCLUDED_NOTES <- cc_normalize_text(c("Training Fee", "Inflight Training Fee"))
+COST_CENTRE_MATRIX_SUPPORTED_EXTENSIONS <- c("csv", "xlsx")
 COST_CENTRE_MATRIX_COLUMN_ALIASES <- c(
   "Activity.Type" = "Activity Type",
   "Staff.Role" = "Staff Role",
@@ -97,6 +98,49 @@ cc_apply_column_aliases <- function(df) {
   dplyr::rename(df, !!!rename_targets)
 }
 
+cc_matrix_file_extension <- function(file_path, file_name = NULL) {
+  display_name <- file_name %||% basename(file_path)
+  extension <- tolower(tools::file_ext(display_name))
+
+  if (!nzchar(extension)) {
+    extension <- tolower(tools::file_ext(file_path))
+  }
+
+  extension
+}
+
+cc_read_cost_centre_matrix <- function(file_path, file_name = NULL) {
+  if (is.na(file_path) || !nzchar(file_path) || !file.exists(file_path)) {
+    stop("Cost centre matrix file not found.")
+  }
+
+  extension <- cc_matrix_file_extension(file_path, file_name)
+  if (!extension %in% COST_CENTRE_MATRIX_SUPPORTED_EXTENSIONS) {
+    stop("Cost centre matrix must be a CSV or XLSX file.")
+  }
+
+  matrix_df <- if (identical(extension, "xlsx")) {
+    openxlsx::read.xlsx(
+      file_path,
+      sheet = 1,
+      check.names = FALSE,
+      skipEmptyRows = FALSE,
+      skipEmptyCols = FALSE
+    )
+  } else {
+    read.csv(
+      file_path,
+      check.names = FALSE,
+      stringsAsFactors = FALSE,
+      colClasses = "character"
+    )
+  }
+
+  matrix_df <- tibble::as_tibble(matrix_df)
+  matrix_df[] <- lapply(matrix_df, as.character)
+  matrix_df
+}
+
 cc_prepare_matrix_rules <- function(df, allowed_posting_line_types = NULL) {
   allowed_posting_line_types <- allowed_posting_line_types %||% cc_allowed_posting_line_types()
   df <- cc_apply_column_aliases(df)
@@ -161,33 +205,63 @@ cc_prepare_matrix_rules <- function(df, allowed_posting_line_types = NULL) {
   )
 }
 
-validate_cost_centre_matrix_file <- function(file_path, allowed_posting_line_types = NULL) {
-  tryCatch({
-    if (is.na(file_path) || !nzchar(file_path) || !file.exists(file_path)) {
-      stop("Cost centre matrix CSV not found.")
-    }
+cc_inspect_cost_centre_matrix <- function(file_path,
+                                          allowed_posting_line_types = NULL,
+                                          file_name = NULL) {
+  matrix_df <- cc_read_cost_centre_matrix(file_path, file_name = file_name)
+  prepared <- cc_prepare_matrix_rules(
+    matrix_df,
+    allowed_posting_line_types = allowed_posting_line_types
+  )
+  canonical_df <- cc_apply_column_aliases(matrix_df)
 
-    matrix_df <- tibble::as_tibble(
-      read.csv(file_path, check.names = FALSE, stringsAsFactors = FALSE)
-    )
-    prepared <- cc_prepare_matrix_rules(
-      matrix_df,
-      allowed_posting_line_types = allowed_posting_line_types
+  populated_counts <- vapply(prepared$split_columns, function(column_name) {
+    values <- trimws(canonical_df[[column_name]])
+    as.integer(sum(!is.na(values) & nzchar(values)))
+  }, integer(1))
+
+  list(
+    data = matrix_df,
+    rules = prepared$rules,
+    split_columns = prepared$split_columns,
+    populated_counts = populated_counts,
+    row_count = nrow(matrix_df),
+    column_count = ncol(matrix_df),
+    file_extension = cc_matrix_file_extension(file_path, file_name)
+  )
+}
+
+validate_cost_centre_matrix_file <- function(file_path,
+                                             allowed_posting_line_types = NULL,
+                                             file_name = NULL) {
+  tryCatch({
+    inspection <- cc_inspect_cost_centre_matrix(
+      file_path,
+      allowed_posting_line_types = allowed_posting_line_types,
+      file_name = file_name
     )
 
     list(
       valid = TRUE,
       message = sprintf(
         "Valid matrix: %s split columns detected.",
-        length(prepared$split_columns)
+        length(inspection$split_columns)
       ),
-      split_columns = prepared$split_columns
+      split_columns = inspection$split_columns,
+      populated_counts = inspection$populated_counts,
+      row_count = inspection$row_count,
+      column_count = inspection$column_count,
+      file_extension = inspection$file_extension
     )
   }, error = function(e) {
     list(
       valid = FALSE,
       message = conditionMessage(e),
-      split_columns = character()
+      split_columns = character(),
+      populated_counts = integer(),
+      row_count = 0L,
+      column_count = 0L,
+      file_extension = ""
     )
   })
 }
@@ -210,9 +284,7 @@ cc_load_active_matrix_rules <- function() {
     stop(validation$message)
   }
 
-  matrix_df <- tibble::as_tibble(
-    read.csv(config$file_path, check.names = FALSE, stringsAsFactors = FALSE)
-  )
+  matrix_df <- cc_read_cost_centre_matrix(config$file_path)
   cc_prepare_matrix_rules(matrix_df)$rules
 }
 

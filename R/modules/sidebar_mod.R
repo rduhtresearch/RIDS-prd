@@ -73,15 +73,18 @@ sidebarServer <- function(id, auth_state, parent_session, current_step) {
               id = "sidebar",
               menuItem("Reporting",     tabName = "tab_reporting", icon = icon("chart-line")),
               menuItem("Study Library", tabName = "tab_library",   icon = icon("book-open")),
-              menuItem("Settings",      tabName = "tab_settings",  icon = icon("cog")),
+              tags$li(class = "rids-sidebar-section-label", "Operations"),
+              menuItem("Cost Centre Matrix", tabName = "tab_cost_centre_matrix", icon = icon("table")),
               menuItem("Integrations",  tabName = "tab_integrations", icon = icon("plug")),
-              menuItem("Support",       tabName = "tab_support",   icon = icon("life-ring")),
               if (isTRUE(is_admin(auth_state$role))) {
                 tagList(
-                  tags$li(class = "rids-sidebar-section-label nav-item", "Admin"),
+                  tags$li(class = "rids-sidebar-section-label", "Admin"),
                   menuItem("Admin", tabName = "tab_admin", icon = icon("users-cog"))
                 )
               },
+              tags$li(class = "rids-sidebar-section-label", "Account"),
+              menuItem("Settings",      tabName = "tab_settings",  icon = icon("cog")),
+              menuItem("Support",       tabName = "tab_support",   icon = icon("life-ring")),
               tagAppendAttributes(
                 menuItem("Home", tabName = "tab_dashboard", icon = icon("home"), selected = TRUE),
                 style = "display:none;"
@@ -111,7 +114,6 @@ sidebarServer <- function(id, auth_state, parent_session, current_step) {
           
           div(
             class = "rids-sidebar-bottom",
-            div(class = "rids-sidebar-section-label", "Account"),
             actionButton(
               ns('logout'),
               label = tagList(icon("sign-out-alt"), " Logout"),
@@ -134,6 +136,12 @@ sidebarServer <- function(id, auth_state, parent_session, current_step) {
       shinyjs::runjs('$("[data-value=\'tab_step1\']").tab("show")')
       shinyjs::runjs("$('body').addClass('sidebar-collapse')")
     })
+
+    observeEvent(parent_session$input$sidebar, {
+      shinyjs::runjs(
+        "if (window.matchMedia('(max-width: 767.98px)').matches) { $('body').removeClass('sidebar-open'); }"
+      )
+    }, ignoreInit = TRUE)
     
   })
 }
