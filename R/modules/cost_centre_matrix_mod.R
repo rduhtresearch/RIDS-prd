@@ -128,7 +128,7 @@ costCentreMatrixUI <- function(id) {
           span(class = "rids-matrix-section-icon", icon("th-list")),
           div(
             h2("Matrix viewer"),
-            p("Search, sort and inspect the current matrix without changing it.")
+            p("Sort and inspect the current matrix without changing it.")
           )
         ),
         uiOutput(ns("viewer_action"))
@@ -355,7 +355,7 @@ costCentreMatrixServer <- function(id, auth_state) {
       reactable(
         current$inspection$data,
         columns = matrix_table_columns(current$inspection$data, current$inspection$split_columns),
-        searchable = TRUE,
+        searchable = FALSE,
         sortable = TRUE,
         resizable = TRUE,
         pagination = TRUE,
@@ -367,10 +367,7 @@ costCentreMatrixServer <- function(id, auth_state) {
         wrap = FALSE,
         fullWidth = TRUE,
         class = "rids-matrix-table",
-        language = reactableLang(
-          searchPlaceholder = "Search matrix",
-          noData = "No matrix rows found"
-        )
+        language = reactableLang(noData = "No matrix rows found")
       )
     })
 
