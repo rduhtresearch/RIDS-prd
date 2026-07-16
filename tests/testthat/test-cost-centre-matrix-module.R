@@ -19,6 +19,8 @@ test_that("cost centre matrix module exposes the operational workspace", {
   expect_match(markup, "Cost Centre Matrix", fixed = TRUE)
   expect_match(markup, "Active split columns", fixed = TRUE)
   expect_match(markup, "Matrix viewer", fixed = TRUE)
+  expect_match(markup, "Sort and inspect the current matrix", fixed = TRUE)
+  expect_false(grepl("Search, sort", markup, fixed = TRUE))
   expect_match(markup, "matrix-matrix_overview", fixed = TRUE)
   expect_match(markup, "matrix-active_split_columns", fixed = TRUE)
   expect_match(markup, "matrix-matrix_table_state", fixed = TRUE)

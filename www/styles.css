@@ -2401,24 +2401,6 @@ body.app-shell .content-wrapper > .content {
   overflow-x: auto;
 }
 
-.rids-matrix-table .rt-search {
-  width: min(100%, 22rem);
-  height: 2.4rem;
-  margin-bottom: 0.7rem;
-  padding: 0.45rem 0.72rem;
-  border: 1px solid var(--rids-border);
-  border-radius: 6px;
-  background: #fbfcfd;
-  color: var(--rids-ink);
-  font-size: 0.78rem;
-}
-
-.rids-matrix-table .rt-search:focus {
-  border-color: rgba(31, 98, 136, 0.55);
-  outline: 0;
-  box-shadow: var(--rids-focus);
-}
-
 .rids-matrix-table .rids-matrix-table-split {
   background: #f2faf6 !important;
 }
